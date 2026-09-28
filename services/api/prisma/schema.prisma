@@ -1,0 +1,336 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+}
+
+// The user domain's root entity. Owned exclusively by the future Auth/User
+// module — no other module should read/write this table directly once we
+// extract modules (Section 54).
+model User {
+  id           String     @id @default(uuid())
+  email        String     @unique
+  passwordHash String
+  name         String
+  role         Role       @default(USER)
+  status       UserStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  refreshTokens       RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
+  auctions            Auction[]
+  bids                Bid[]
+  ordersAsSeller      Order[]              @relation("OrdersAsSeller")
+  ordersAsBuyer       Order[]              @relation("OrdersAsBuyer")
+
+  @@map("users")
+}
+
+// One row per issued refresh token. tokenHash is SHA-256 of the opaque
+// random token the client holds — a plain fast hash is correct here (unlike
+// passwordHash) because the input is already 256 bits of random data, not a
+// low-entropy human secret; there's no brute-force space to slow down.
+//
+// replacedByTokenId links one rotation step (old -> new). familyId is
+// shared by every token descended from the same login, set once and copied
+// forward on each rotation — it's what lets "revoke every token derived
+// from this compromised one" be a single indexed UPDATE instead of an
+// unbounded walk through replacedByTokenId pointers (a long-lived session
+// refreshing every 15 min for the full 30-day window could chain through
+// ~2,880 tokens).
+//
+// If a revoked token is ever presented again, that's a signal of token
+// theft (attacker and legitimate user both hold a copy) — the whole family
+// gets revoked (Section 41: don't add a mechanism without deciding what
+// happens when it detects a problem).
+model RefreshToken {
+  id                String    @id @default(uuid())
+  userId            String
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  familyId          String
+  tokenHash         String    @unique
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  replacedByTokenId String?
+
+  createdAt DateTime @default(now())
+  userAgent String?
+  ip        String?
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+// Single-use, short-lived (30 min). No rotation/family concept needed here
+// unlike RefreshToken — a reset flow isn't a long-lived session, it's one
+// attempt. Requesting a new reset invalidates any prior outstanding one for
+// the same user (see repository.ts) so a stale, unused, unexpired token
+// from an earlier email doesn't sit around as extra attack surface.
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+enum AuctionStatus {
+  DRAFT
+  PUBLISHED
+  ACTIVE
+  PAUSED
+  CANCELLED
+  ENDED
+}
+
+// Deliberately a small, fixed, code-controlled vocabulary rather than a
+// lookup table — same YAGNI justification as Role/UserStatus above. Revisit
+// only if categories need to be admin-editable at runtime or need hierarchy.
+enum AuctionCategory {
+  ART
+  COLLECTIBLES
+  JEWELRY
+  WATCHES
+  COINS_AND_CURRENCY
+  MEMORABILIA
+  BOOKS_AND_MANUSCRIPTS
+  OTHER
+}
+
+enum AuctionCondition {
+  NEW
+  LIKE_NEW
+  GOOD
+  FAIR
+  POOR
+}
+
+// The auction domain's root entity. Owned by the future Auctions module.
+//
+// Money is stored as integer cents, never Decimal/Float — floating point
+// cannot represent money exactly, and integer minor units match the
+// convention real payment providers (Phase 8) use, avoiding a conversion
+// boundary between this module and Payments later.
+//
+// currentPriceCents exists already even though bidding doesn't (Phase 4) —
+// the bid-placement transaction will update this column as part of the same
+// atomic "persist bid + update auction state" step (Section 10), so it
+// belongs on this table from the start rather than arriving as a later
+// breaking migration. It starts equal to startingPriceCents.
+//
+// images is a placeholder contract (empty by default): object storage
+// (Section 27) isn't built yet, but the eventual upload mechanism only ever
+// needs to populate this array — no schema change required when it lands.
+//
+// seller uses onDelete: Restrict, not Cascade like RefreshToken/
+// PasswordResetToken — an Auction is a business record, not a disposable
+// session artifact. A user who has ever listed an auction cannot be deleted
+// out from under that history.
+model Auction {
+  id       String @id @default(uuid())
+  sellerId String
+  seller   User   @relation(fields: [sellerId], references: [id], onDelete: Restrict)
+
+  title       String
+  description String
+  category    AuctionCategory
+  condition   AuctionCondition
+  images      String[]         @default([])
+
+  startingPriceCents Int
+  reservePriceCents  Int?
+  currentPriceCents  Int
+
+  status AuctionStatus @default(DRAFT)
+
+  // Nullable while DRAFT — a seller may not have scheduled the auction yet.
+  // "must be set before publish" is enforced in the service layer, not here.
+  startTime DateTime?
+  endTime   DateTime?
+  // Separate from endTime: endTime is the *planned* end (and can move —
+  // anti-sniping extends it, Section 18); endedAt is when it *actually*
+  // ended, which can diverge (early cancellation, extension). Collapsing
+  // these would make "did this run its full course or end early" unrecoverable.
+  endedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bids  Bid[]
+  order Order?
+
+  @@index([sellerId])
+  @@index([status])
+  // Matches the exact query the Phase 4 closing worker will run: active
+  // auctions whose endTime has passed.
+  @@index([status, endTime])
+  @@map("auctions")
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAID
+  CANCELLED
+}
+
+// Created exactly once, atomically, inside the same transaction that closes
+// an auction (see closeAuctionIfExpired in modules/auctions/repository.ts) —
+// not via an event/outbox. There is no cross-system boundary to cross yet
+// (Order lives in the same Postgres database as Auction, and Kafka/Outbox,
+// Section 16, doesn't exist until Phase 7), so a second write inside the
+// same transaction is strictly simpler than publishing an event to create
+// a row in a table one query away. Revisit if Order creation ever needs to
+// react to something outside this monolith.
+//
+// auctionId is @unique, not just indexed — an auction can end at most once
+// (closeAuctionIfExpired's own idempotency guarantees that already), so it
+// can produce at most one Order, ever. That invariant belongs in the schema,
+// not just in application logic.
+//
+// No Order row is created at all when there is no winner (no bids, or the
+// highest bid didn't meet reservePriceCents) — see ORDER-002. An Order
+// existing IS the "this auction has a winner who owes payment" signal;
+// there's no separate boolean to keep in sync.
+model Order {
+  id           String  @id @default(uuid())
+  auctionId    String  @unique
+  auction      Auction @relation(fields: [auctionId], references: [id], onDelete: Restrict)
+  winningBidId String  @unique
+  winningBid   Bid     @relation(fields: [winningBidId], references: [id], onDelete: Restrict)
+  sellerId     String
+  seller       User    @relation("OrdersAsSeller", fields: [sellerId], references: [id], onDelete: Restrict)
+  buyerId      String
+  buyer        User    @relation("OrdersAsBuyer", fields: [buyerId], references: [id], onDelete: Restrict)
+
+  amountCents Int
+
+  status OrderStatus @default(PENDING_PAYMENT)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments Payment[]
+
+  @@index([sellerId])
+  @@index([buyerId])
+  @@map("orders")
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+// One Order can have multiple Payment attempts (a FAILED one, then a retry)
+// — that's why amountCents/status live on Payment, not folded onto Order,
+// and why Order.status is the derived "does this order currently have a
+// SUCCEEDED payment" summary rather than the payment record itself.
+//
+// providerRef + idempotencyKey are separate on purpose: idempotencyKey is
+// OUR key, generated when we create the intent, used to make "create intent
+// for this order" itself idempotent (Section 11 — a buyer double-clicking
+// Pay must not create two intents). providerRef is THEIR id for the same
+// object, always known synchronously (the provider call returns it before
+// we ever write this row — see modules/payments/service.ts), needed to
+// correlate an incoming webhook back to this row. Never trust a webhook's
+// claimed amount against anything but this row's own amountCents (Section
+// 19) — PaymentWebhookEvent (infrastructure/payments/provider.ts)
+// deliberately carries no amount field at all, so there's nothing to
+// mistakenly trust even if a future provider integration tried to.
+//
+// idempotencyKey is scoped PER ORDER (@@unique([orderId, idempotencyKey]),
+// not a bare global unique) — the same pattern as Bid's
+// @@unique([bidderId, idempotencyKey]) — because a fresh payment attempt
+// after an earlier FAILED one is a legitimate new key, and scoping to the
+// order (rather than relying on random-UUID-never-collides-globally) makes
+// that intent explicit in the schema. Unlike Bid, this can't be enforced by
+// holding one lock across the whole operation (Section 65 — never hold a
+// Postgres row lock across an external network call to the payment
+// provider), so the constraint itself is the race-breaker: two concurrent
+// attempts both insert optimistically, the loser's insert fails with a
+// unique violation, and the service layer catches that and returns the
+// winner's row instead (see createPaymentIntentForOrder).
+//
+// providerRef + provider are also @@unique together: a provider's id is
+// only unique within that provider's own namespace, and this is the exact
+// pair a webhook uses to find its way back to a row.
+model Payment {
+  id          String @id @default(uuid())
+  orderId     String
+  order       Order  @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  provider    String
+  providerRef String
+
+  amountCents Int
+  status      PaymentStatus @default(PENDING)
+
+  idempotencyKey String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orderId, idempotencyKey])
+  @@unique([provider, providerRef])
+  @@index([orderId])
+  @@map("payments")
+}
+
+// Only ever holds ACCEPTED bids - a bid whose amount doesn't beat the
+// current price is rejected at write time (BID-002) and never persisted, so
+// there's nothing worth remembering about an attempt that never took
+// effect. Consequently this table is append-only: never updated, never
+// deleted. There's no `isWinning`/status column either - because every
+// accepted bid must exceed the previous price by construction, the most
+// recent bid for an auction IS the current highest one; no aggregate or
+// flag needs to be kept in sync as new bids arrive.
+model Bid {
+  id        String  @id @default(uuid())
+  auctionId String
+  auction   Auction @relation(fields: [auctionId], references: [id], onDelete: Restrict)
+  bidderId  String
+  bidder    User    @relation(fields: [bidderId], references: [id], onDelete: Restrict)
+
+  amountCents Int
+
+  // Scoped to the bidder, not globally unique - Section 11's idempotency
+  // pattern applied to bid placement, which (unlike registration's email)
+  // has no natural uniqueness key of its own. Matches how real payment
+  // APIs scope idempotency keys to the caller, not the whole system.
+  idempotencyKey String
+
+  createdAt DateTime @default(now())
+
+  order Order?
+
+  @@unique([bidderId, idempotencyKey])
+  // Matches "give me this auction's bid history, newest first" - the same
+  // query that answers "what's the current highest bid" per the comment
+  // above.
+  @@index([auctionId, createdAt])
+  @@index([bidderId])
+  @@map("bids")
+}

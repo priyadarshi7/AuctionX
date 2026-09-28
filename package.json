@@ -1,0 +1,25 @@
+{
+  "name": "auctionx",
+  "private": true,
+  "version": "0.0.0",
+  "description": "AI-powered auction platform — industry-grade, learning-oriented build",
+  "workspaces": [
+    "apps/*",
+    "services/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace=services/api",
+    "build:api": "npm run build --workspace=services/api",
+    "test:api": "npm run test --workspace=services/api",
+    "lint:api": "npm run lint --workspace=services/api",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "build:web": "npm run build --workspace=apps/web",
+    "lint:web": "npm run lint --workspace=apps/web",
+    "db:backup": "npm run db:backup --workspace=services/api",
+    "db:restore": "npm run db:restore --workspace=services/api --"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

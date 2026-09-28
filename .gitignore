@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+.next/
+out/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Testing
+coverage/
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Prisma
+services/api/prisma/migrations/dev.db
+
+# Local Postgres backups (scripts/db-backup.ts) — real dev data (password
+# hashes, emails), never committed. See ADR-0024.
+backups/
+
+# Misc
+*.tsbuildinfo

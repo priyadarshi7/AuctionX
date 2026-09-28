@@ -1,0 +1,97 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: auctionx-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: auctionx
+      POSTGRES_PASSWORD: auctionx_dev_password
+      POSTGRES_DB: auctionx
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U auctionx']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # No volume: rate-limit counters are ephemeral and non-critical (Redis is
+  # never the source of truth, CLAUDE.md Section 12) — losing them on
+  # restart just resets everyone's throttle window, which is harmless.
+  redis:
+    image: redis:7-alpine
+    container_name: auctionx-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # s3mock (Adobe, Apache-2.0, actively maintained): the local, self-hosted
+  # stand-in for Cloudflare R2 (CLAUDE.md Section 27/83) for object storage.
+  # Two earlier choices were tried and abandoned here, for real reasons
+  # worth recording:
+  #   - MinIO: `docker pull minio/minio` (and every public mirror tried —
+  #     quay.io, ghcr.io) now returns "access denied" — MinIO restricted
+  #     anonymous Docker distribution of their images sometime in 2025.
+  #   - LocalStack: pulls fine, but `latest` (and every currently-listed
+  #     tag) now refuses to start at all without a LOCALSTACK_AUTH_TOKEN
+  #     from a LocalStack account — even for the free community S3 service,
+  #     which defeats the entire point of a fully self-hosted local stack
+  #     (Section 83: local dev must never require a live third-party
+  #     account, the same reasoning that ruled out Cloudinary).
+  # s3mock has neither problem: no login, no bucket pre-creation needed via
+  # a fragile init step either — infrastructure/storage/s3Client.ts's
+  # `ensureBucketExists` creates it idempotently at boot, which also means
+  # this same code path works unmodified against a real bucket in
+  # production (a no-op there, since the bucket already exists).
+  # Unlike Redis (genuinely disposable cache data), an uploaded image is
+  # real content a developer doesn't want to silently lose — a volume here
+  # matches Postgres's precedent, not Redis's. Without this, ANY container
+  # recreate (not just a full `docker compose down` — this bit a real
+  # session on 2026-09-28 via an unrelated healthcheck fix, see PROGRESS.md)
+  # silently wipes every previously-uploaded object while Postgres keeps
+  # referencing the now-dead URLs, which looks exactly like a rendering bug
+  # from the frontend but isn't one.
+  #
+  # `COM_ADOBE_TESTING_S3MOCK_STORE_ROOT`/`_RETAINFILESONEXIT`: by default
+  # this image stores objects in an ephemeral `/tmp` path and explicitly
+  # deletes them on exit regardless of any volume mount — confirmed by
+  # reading its actual Spring property names out of the image's own
+  # bytecode (`COM_ADOBE_TESTING_S3MOCK_STORE_ROOT` was not documented
+  # anywhere obvious), not guessed. Both are required together; a volume
+  # alone does nothing here.
+  #
+  # `user: "0:0"`: a fresh Docker named volume mounts owned by root, but
+  # this image's default user is a non-root uid — without running as root,
+  # every write fails with an internal error the moment the app tries to
+  # create its store directory. Local-dev-only container, so running as
+  # root is a pragmatic simplification, not a production security decision.
+  s3mock:
+    image: adobe/s3mock:latest
+    container_name: auctionx-s3mock
+    restart: unless-stopped
+    user: '0:0'
+    environment:
+      COM_ADOBE_TESTING_S3MOCK_STORE_ROOT: /data
+      COM_ADOBE_TESTING_S3MOCK_STORE_RETAINFILESONEXIT: 'true'
+    ports:
+      - '9090:9090'
+    volumes:
+      - s3mock_data:/data
+    # `curl` doesn't exist in this image (a minimal buildpacks/JVM base) —
+    # confirmed via `docker exec`, not assumed. `wget` (BusyBox) does.
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://localhost:9090/']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+  s3mock_data:
