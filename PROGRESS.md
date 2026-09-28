@@ -45,7 +45,16 @@ matching Section 64's own diagram. Idempotent consumer, dead-letter queue
 on unprocessable messages — both genuinely exercised, not just built:
 verified live when the production consumer group's first connection
 replayed a backlog of stale test data and correctly DLQ'd every
-unprocessable message instead of crashing.
+unprocessable message instead of crashing. **Phase 9 — Search** is now
+done (ADR-0029): OpenSearch, fed via the SAME Outbox/Kafka mechanism Phase
+7 built — a dedicated `search-events` topic (deliberately not reusing
+`auction-events`, which would have corrupted the notifications consumer's
+DLQ signal), a `modules/search` consumer that re-fetches from Postgres and
+upserts/deletes into the index, and a new public `GET /api/v1/search/
+auctions` endpoint with relevance-ranked full-text search plus category/
+status/price filters. Verified live end-to-end including the required
+failure mode: a real bid succeeded instantly with OpenSearch fully
+stopped, and the index self-healed on the next event once it came back.
 
 ## Project location
 
@@ -83,6 +92,92 @@ developer chose to defer the actual shrink (`wsl --shutdown` + admin
 mid-session; still open whenever convenient.
 
 ## Current Task
+
+**TASK SEARCH-001 — OpenSearch-backed auction search (Phase 9, ADR-0029)**
+→ **complete, not committed yet**. See ADR-0029 for full design/tradeoffs.
+Summary: `docker-compose.yml` gained an `opensearch` service (verified
+pullable/startable/healthy first, same discipline as Redpanda — 1.47GB
+image, GREEN cluster health in ~10s, no `vm.max_map_count` friction on
+this machine). Every place an auction's searchable fields change (six
+`auctions/repository.ts` mutation functions, all three `closeAuctionIfExpired`
+outcomes, every accepted bid in `bids/repository.ts`) now publishes a
+minimal `{type:'auction.reindex', auctionId}` outbox event on a NEW
+dedicated `search-events` topic — dedicated specifically so it can't
+corrupt `modules/notifications/consumer.ts`'s existing DLQ signal on
+`auction-events`. `modules/search/consumer.ts` re-fetches the auction fresh
+from Postgres on every event (never trusts payload-carried fields) and
+upserts/deletes into OpenSearch, correctly excluding DRAFT auctions
+(ADR-0008). New public `GET /api/v1/search/auctions` endpoint (`q` full-
+text + category/status/price filters), returning a structured 503
+`SEARCH_UNAVAILABLE` — never a silently-empty result set — if OpenSearch is
+unreachable.
+
+**Found during this task's own verification, and then FIXED (TASK
+OUTBOX-002, ADR-0030)**: `infrastructure/jobs/outboxPublisherWorker.ts` had
+no row-level locking — a live dev server left running during a full
+test-suite run raced with the suite's own outbox publishing against the
+shared dev Postgres instance, producing two real (not flaky-by-chance) test
+failures. Fixed with a claim-lease pattern: a new nullable
+`OutboxEvent.claimedAt` column, claimed via a single atomic
+`UPDATE ... WHERE id IN (SELECT ... FOR UPDATE SKIP LOCKED) RETURNING *`
+(the lock held only for that statement, never across the actual Kafka
+sends — Section 65), with a 30s lease so a genuinely crashed worker's
+claimed-but-unpublished rows self-heal, and immediate claim release on an
+ordinary send failure so normal retries stay as fast as before this fix.
+Verified two ways: two separate `PrismaClient` connections racing
+`Promise.all` for the same row (run 3x, exactly one won every time), and
+by literally recreating the original failure scenario — a live dev server
+running during a full suite run — which now passes 165/165 clean.
+
+**TASK WEB-DESIGN-001 — Visual redesign of the public-facing frontend** →
+**in progress (scoped first pass complete, not committed yet)**. Purely a
+frontend/visual task, no backend changes. Replaced the placeholder
+Tailwind-defaults look with a real design system: `Bricolage Grotesque`
+(display/headings) + `Caveat` (handwritten sticky-note accents, decorative
+only, never body copy) via `next/font/google`, a flat "sticker" visual
+language (`--ink`/`--cream`/`--yellow`/`--pink`/`--cyan`/`--green` tokens +
+`shadow-hard`/`shadow-hard-sm` flat box-shadows, `apps/web/app/globals.css`),
+and a small reusable `Mascot` SVG component
+(`apps/web/app/components/Mascot.tsx`). Redesigned: `NavBar.tsx` (pill-style
+nav, active-route highlight), `NotificationBell.tsx` (restyled only, logic
+untouched), the home page (`app/page.tsx` — hero, trending-categories grid,
+live-auctions grid fed by real data, "why it works" strip, CTA band), and
+the auctions browse page (`app/auctions/page.tsx` — pill category filters
+replacing the native `<select>`). New shared `AuctionCard` component
+(`app/components/AuctionCard.tsx`) used by both the home page and the
+browse page so auction rendering isn't duplicated.
+
+**Real constraint surfaced and resolved without touching the backend**: the
+user's reference asked for trending categories like "Sneakers" and "Pokémon
+cards," but `AUCTION_CATEGORIES` (schema.prisma / types/auction.ts) has no
+such categories — only `COLLECTIBLES`, `BOOKS_AND_MANUSCRIPTS`, etc. Rather
+than inventing a fake taxonomy the backend doesn't support, added a
+presentation-only mapping (`apps/web/lib/categoryDisplay.ts`,
+`Record<AuctionCategory, ...>` so TypeScript fails the build if a category
+is ever added to the enum and this mapping isn't updated) that surfaces
+"Sneakers, Pokémon cards, funko pops" as trending *examples* inside the
+real `COLLECTIBLES` tile, and `BOOKS_AND_MANUSCRIPTS` directly as "Books &
+Manuscripts."
+
+Verified live (not just build/lint): `npm run build` and `npm run lint`
+clean in `apps/web`; then real Playwright screenshots against the actual
+running dev server (`localhost:3000`) with real backend data — hero, the
+8-tile category grid, the "live auctions" empty state (mascot + copy, since
+there are genuinely 0 ACTIVE auctions right now), and the browse page's
+category-filter pill actually filtering a real auction via a real click,
+not just a static render. One apparent bug (ghosted "Register"/"Log in"
+text in the footer band on a full-page screenshot) was confirmed to be a
+Playwright full-page-screenshot compositing artifact with `position:
+sticky` elements, not a real rendering bug — re-verified with a real
+scroll-then-screenshot instead of full-page stitching.
+
+**Deliberately out of scope for this pass** (not a backend-touching
+decision, just scope discipline — one focused change, not a sweep):
+`login`/`register`/`auctions/new`/`auctions/[id]`/`my-auctions`/`orders`
+pages still use the old plain Tailwind styling. Natural next step if asked
+to continue.
+
+---
 
 **TASK KAFKA-001 — Kafka/Outbox + move Notifications off the critical path
 (ADR-0027)** → **complete**. Redpanda added to docker-compose.yml
@@ -1862,6 +1957,9 @@ whenever the developer wants any of them.
 - `docs/architecture/adr/0025-payment-domain-and-mock-provider.md`
 - `docs/architecture/adr/0026-notifications.md`
 - `docs/architecture/adr/0027-kafka-outbox-notifications.md`
+- `docs/architecture/adr/0028-redis-port-6379-collision.md`
+- `docs/architecture/adr/0029-opensearch-auction-search.md`
+- `docs/architecture/adr/0030-outbox-publisher-claim-lease.md`
 
 ## Known accepted issues
 
@@ -1885,22 +1983,19 @@ whenever the developer wants any of them.
   Revisit only if this ever masks a real bug in policy construction — e.g.
   via a targeted test against a real, disposable R2 bucket in CI.
 
-- **Port 6379 on this dev machine reaches two different Redis instances
-  depending on how you connect** (found during WS-002's live verification,
-  ADR-0021): `docker exec auctionx-redis redis-cli DBSIZE` shows an empty,
-  recently-restarted container (expected — ADR-0005's Redis has no volume),
-  but the app's own `REDIS_URL=redis://localhost:6379` connection (and an
-  `ioredis` client run directly from the Windows host) sees a DIFFERENT,
-  persistent instance holding 67 keys, including `bull:resourcex-jobs:*`
-  BullMQ data that isn't part of this project. Something other than this
-  project's `docker compose` stack is also bound to port 6379 — not
-  identified or fixed, since it didn't block WS-002 (the specific
-  rate-limit keys needed were cleared directly through the connection the
-  app actually uses) and touching Docker/WSL2 networking blindly felt
-  riskier than flagging it. Worth the developer's own investigation: this
-  means AuctionX's cache/rate-limit data is currently commingled with an
-  unrelated project's Redis data, and which instance "wins" on a given
-  machine restart is unverified/possibly non-deterministic.
+- ~~Port 6379 on this dev machine reaches two different Redis instances
+  depending on how you connect~~ — **RESOLVED (ADR-0028)**. Root cause
+  found via `netstat -ano`/`tasklist`: `com.docker.backend.exe` publishes
+  the `auctionx-redis` container on the wildcard address, but `wslrelay.exe`
+  independently forwards some other WSL2 distro's own Redis to Windows'
+  loopback address on the same port number, and Node's `localhost`
+  resolution silently preferred the more specific loopback bind. Fixed by
+  moving `docker-compose.yml`'s redis service to host port 6380 (container
+  keeps its normal internal 6379) — self-contained within this project,
+  doesn't touch the other WSL2 service at all. Verified with a live
+  `redis-cli MONITOR` on the container showing the real `EVAL`/`INCR`/
+  `EXPIRE` sequence from a real login request landing on it in real time;
+  full `rateLimit`+`auth` suites re-run clean (43/43).
 - **Legitimate multi-tab refresh now deterministically logs the user out**
   (ADR-0019, accepted per ADR-0004's already-documented tradeoff): two
   tabs refreshing the same token near-simultaneously will always resolve
@@ -2024,6 +2119,7 @@ whenever the developer wants any of them.
   Kafka/WebSockets exist to close too (Prisma + Redis both handled now).
 - Sliding-window rate limiting — only if fixed window's boundary-burst gap
   shows up as an actually exploited issue (ADR-0005).
-- `apps/web` (Next.js frontend) — not started.
+- Frontend search bar — `apps/web`'s NavBar never got one; the backend
+  (SEARCH-001/ADR-0029) didn't exist until now. Natural next step.
 - CI (GitHub Actions) — deferred to Phase 15 per the phase plan, though a
   minimal lint+test workflow could reasonably move earlier if requested.

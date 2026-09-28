@@ -1,6 +1,6 @@
 import { logger } from '../observability/logger';
 import { isProducerConnected, producer } from '../kafka/producer';
-import { findUnpublishedOutboxEvents, markOutboxEventPublished } from '../outbox/repository';
+import { claimOutboxEvents, markOutboxEventPublished, releaseOutboxEventClaim } from '../outbox/repository';
 
 // How often the worker scans for unpublished events. Short enough that a
 // notification feels close to real-time; not so short that it's polling
@@ -10,6 +10,12 @@ import { findUnpublishedOutboxEvents, markOutboxEventPublished } from '../outbox
 // measured justification for anything tighter yet.
 const SCAN_INTERVAL_MS = 2_000;
 const BATCH_SIZE = 50;
+// How long a claim is honored before another worker may reclaim the row —
+// see claimOutboxEvents's doc comment. Comfortably longer than a batch of
+// 50 sequential Kafka sends should ever take under normal conditions
+// (Section 62 — no measured reason for anything tighter), short enough
+// that a genuinely crashed worker's stuck rows recover promptly.
+const CLAIM_LEASE_MS = 30_000;
 
 let intervalHandle: NodeJS.Timeout | undefined;
 
@@ -25,7 +31,11 @@ export async function runOnce(): Promise<void> {
     return;
   }
 
-  const events = await findUnpublishedOutboxEvents(BATCH_SIZE);
+  // Claims (not just reads) this batch first — see claimOutboxEvents's doc
+  // comment for why: without this, a second concurrent worker instance
+  // (against the same Postgres) could select and publish the SAME rows,
+  // producing duplicate Kafka messages for one logical event.
+  const events = await claimOutboxEvents(BATCH_SIZE, CLAIM_LEASE_MS);
 
   for (const event of events) {
     try {
@@ -40,10 +50,16 @@ export async function runOnce(): Promise<void> {
     } catch (err) {
       // One event failing to publish must not stop the rest of the batch
       // from being attempted, and must not mark THIS one published — it
-      // stays unpublished and is retried next tick (Section 41: this is a
-      // transient-failure retry, not a poison-message concern — that's the
-      // consumer side's job, via its own DLQ).
+      // stays unpublished (Section 41: this is a transient-failure retry,
+      // not a poison-message concern — that's the consumer side's job, via
+      // its own DLQ). Its claim is released immediately, not left to
+      // expire — this worker is right here and available to retry it on
+      // the very next scan, exactly like before this fix, rather than
+      // waiting out the full crash-recovery lease for no reason.
       logger.error({ err, outboxEventId: event.id, topic: event.topic }, 'Failed to publish outbox event');
+      await releaseOutboxEventClaim(event.id).catch((releaseErr: unknown) => {
+        logger.error({ err: releaseErr, outboxEventId: event.id }, 'Failed to release outbox event claim');
+      });
     }
   }
 }

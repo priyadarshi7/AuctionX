@@ -446,9 +446,22 @@ model OutboxEvent {
   createdAt   DateTime  @default(now())
   publishedAt DateTime?
 
-  // The exact query the publisher worker runs: oldest unpublished events
-  // first, so a long Kafka/Redpanda outage doesn't reorder delivery once
-  // it recovers.
-  @@index([publishedAt, createdAt])
+  // Claim-lease, added ADR-0029's revisit list / this fix: without this,
+  // two concurrent outboxPublisherWorker instances (e.g. a live `npm run
+  // dev` server left running alongside a test suite, both against the
+  // same Postgres — a real thing that happened) could both SELECT the
+  // same unpublished row and both publish it to Kafka, producing two
+  // distinct messages for one logical event. `claimedAt` is stamped by a
+  // SHORT transaction (SELECT ... FOR UPDATE SKIP LOCKED + UPDATE, held
+  // only for that claim, never across the actual Kafka sends — Section 65)
+  // before a row is published; a claim older than the worker's lease
+  // window is treated as abandoned (the claiming process crashed) and
+  // re-claimable by anyone.
+  claimedAt   DateTime?
+
+  // The exact query the publisher worker runs: oldest unclaimed-or-
+  // lease-expired unpublished events first, so a long Kafka/Redpanda
+  // outage doesn't reorder delivery once it recovers.
+  @@index([publishedAt, claimedAt, createdAt])
   @@map("outbox_events")
 }

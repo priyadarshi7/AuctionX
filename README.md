@@ -21,7 +21,7 @@ pre-scaffold empty structure).
 ```bash
 npm install
 cp services/api/.env.example services/api/.env
-docker compose up -d              # Postgres, Redis, s3mock, Redpanda
+docker compose up -d              # Postgres, Redis, s3mock, Redpanda, OpenSearch
 npm run --workspace=services/api prisma:migrate   # apply migrations
 npm run dev:api      # start the API in watch mode (http://localhost:4000)
 npm run test:api     # run the API test suite (needs the full docker-compose stack running)
@@ -56,6 +56,9 @@ npm run db:restore -- <path.sql>  # OVERWRITES current local DB contents — no 
 - Jest + Supertest for testing
 - Redpanda (Kafka-API-compatible) + the Outbox pattern for durable
   async events (see ADR-0027)
+- OpenSearch for full-text auction search — a derived index kept in sync
+  via the same Outbox/Kafka mechanism, never the source of truth (see
+  ADR-0029)
 - WebSockets for live auction updates and notifications (see ADR-0020/0021)
 
 This section (and the "Structure" one above) describes only the backend's
