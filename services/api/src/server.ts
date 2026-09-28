@@ -16,6 +16,7 @@ import { startNotificationsConsumer, stopNotificationsConsumer } from './modules
 import { startSearchConsumer, stopSearchConsumer } from './modules/search/consumer';
 import { ensureAuctionIndex } from './modules/search/repository';
 import { reindexAllAuctions } from './modules/search/service';
+import { startAiValuationConsumer, stopAiValuationConsumer } from './modules/ai/consumer';
 
 const app = createApp();
 
@@ -60,6 +61,12 @@ void ensureAuctionIndex()
     logger.error({ err }, 'Failed to ensure OpenSearch auction index exists / backfill');
   });
 startSearchConsumer();
+// AI valuation (Phase 10, ADR-0032): same fire-and-forget treatment as the
+// search consumer above — no bootstrap step needed here (unlike search's
+// ensureAuctionIndex, there's no external index to create), just start
+// consuming. Ollama being unreachable is handled per-event inside
+// modules/ai/consumer.ts (a FAILED valuation, not a crashed process).
+startAiValuationConsumer();
 
 // Graceful shutdown: stop accepting new connections, let in-flight requests
 // finish, close the DB pool and Redis connection, then exit (Section 69).
@@ -88,6 +95,9 @@ function shutdown(signal: string): void {
   });
   void stopSearchConsumer().catch((err: unknown) => {
     logger.error({ err }, 'Error stopping search consumer');
+  });
+  void stopAiValuationConsumer().catch((err: unknown) => {
+    logger.error({ err }, 'Error stopping AI valuation consumer');
   });
   server.close((err) => {
     if (err) {

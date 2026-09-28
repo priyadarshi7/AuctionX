@@ -196,3 +196,20 @@ export const bidRateLimit = rateLimit({
   keyPrefix: 'bid',
   keyBy: bidRateLimitKeyBy,
 });
+
+// Phase 10 (ADR-0032): unlike most write endpoints, regenerating a
+// valuation costs real, slow CPU time on a single shared, self-hosted
+// Ollama instance — closer in shape to bidRateLimit's "this specific action
+// has an unusually expensive cost profile" justification than to the
+// generic apiRateLimit ceiling. Keyed by user alone (not per-auction like
+// bidding, which needs to bound contention on one hot row) — the resource
+// being protected here is the shared Ollama container itself, not any one
+// auction's data.
+const AI_REGENERATE_RATE_LIMIT_MAX = 5;
+
+export const aiRegenerateRateLimit = rateLimit({
+  windowSeconds: 10 * 60,
+  max: isTestEnv ? TEST_ENV_MAX : AI_REGENERATE_RATE_LIMIT_MAX,
+  keyPrefix: 'ai-regenerate',
+  keyBy: (req) => `user:${req.user?.id ?? 'unknown'}`,
+});

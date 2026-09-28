@@ -84,6 +84,24 @@ const envSchema = z.object({
   // KAFKA_BROKERS, so this gets a default instead of being required.
   OPENSEARCH_URL: z.string().url().default('http://localhost:9200'),
   OPENSEARCH_AUCTIONS_INDEX: z.string().min(1).default('auctions'),
+  // Phase 10 (Section 20/22, ADR-0032): self-hosted Ollama, chosen over a
+  // paid cloud vision API specifically to keep local dev at $0 and
+  // account-free (Section 83's "prefer free/local" principle applied to
+  // AI the same way it was to object storage/search). Same "must still
+  // boot with this unreachable" reasoning as OPENSEARCH_URL/KAFKA_BROKERS —
+  // valuation is an enhancement (Section 24), never load-bearing for
+  // auction creation itself.
+  OLLAMA_URL: z.string().url().default('http://localhost:11434'),
+  // A small (~1.6B), CPU-friendly vision-language model — chosen for
+  // iteration speed on hardware with no GPU, at a real quality cost (see
+  // ADR-0032): its price estimates are a rough guess, not an appraisal. A
+  // single config value, swappable for a larger local model or a future
+  // cloud provider without touching modules/ai's business logic.
+  OLLAMA_VALUATION_MODEL: z.string().min(1).default('moondream'),
+  // CPU inference on a small local model is still seconds-to-tens-of-
+  // seconds per call, not milliseconds — generous on purpose, this is a
+  // background worker's timeout, never on any user-facing request path.
+  OLLAMA_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
 });
 
 // Parse and Check Schema

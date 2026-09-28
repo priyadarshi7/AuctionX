@@ -186,8 +186,37 @@ services:
       timeout: 5s
       retries: 15
 
+  # Ollama: self-hosted, free, local model runtime for Phase 10's AI
+  # valuation (Section 20/22, ADR-0032) — chosen over a paid cloud vision
+  # API specifically so local dev stays at $0 and needs no account, the same
+  # principle Section 83 already applies to object storage/search/Kafka.
+  # Model weights are NOT bundled in the image (they're gigabytes,
+  # downloaded on first use) — after `docker compose up`, run
+  # `npm run ai:pull-model --workspace=services/api` once to actually pull
+  # OLLAMA_VALUATION_MODEL (default `moondream`) into this container. The
+  # app boots fine either way; valuation requests just stay
+  # PENDING/FAILED until the model has been pulled.
+  #
+  # Gets a volume (unlike Redis's ephemeral counters) for the same reason
+  # OpenSearch's index does: re-downloading gigabytes of model weights on
+  # every container restart would be real, avoidable dev-workflow friction.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: auctionx-ollama
+    restart: unless-stopped
+    ports:
+      - '11434:11434'
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ['CMD-SHELL', 'ollama list || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   postgres_data:
   s3mock_data:
   redpanda_data:
   opensearch_data:
+  ollama_data:

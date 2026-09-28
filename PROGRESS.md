@@ -55,6 +55,11 @@ auctions` endpoint with relevance-ranked full-text search plus category/
 status/price filters. Verified live end-to-end including the required
 failure mode: a real bid succeeded instantly with OpenSearch fully
 stopped, and the index self-healed on the next event once it came back.
+**Phase 10 — AI** is now started: item valuation (AI-001, ADR-0032) is
+done — self-hosted Ollama (free/local by explicit developer direction),
+async via the same Outbox/Kafka mechanism as search. The other three
+Section 20-22 AI features (listing assistant, fraud detection,
+recommendations) are not built yet.
 
 ## Project location
 
@@ -92,6 +97,62 @@ developer chose to defer the actual shrink (`wsl --shutdown` + admin
 mid-session; still open whenever convenient.
 
 ## Current Task
+
+**TASK AI-001 — Item valuation via self-hosted Ollama (Phase 10, ADR-0032)**
+→ **complete, not committed yet**. Section 20's AI valuation (estimated
+value/confidence/price range/explanation), triggered asynchronously off the
+SAME Outbox/Kafka mechanism Phase 9 built — `createAuction` writes a
+`PENDING` `AuctionValuation` row and an outbox event atomically, in the same
+transaction as the auction itself, and a dedicated `modules/ai/consumer.ts`
+does the actual model call off the request path entirely (Section 24: never
+on the critical path). Provider is a self-hosted Ollama instance
+(`docker-compose.yml`'s new `ollama` service), running `moondream` (~1.6B,
+CPU-friendly) — the developer's explicit direction for this phase was to
+prefer free/local infrastructure over a paid cloud vision API, the same
+principle already applied to object storage/search/Kafka. A
+`ValuationProvider` interface (mirrors `PaymentProvider`/`EmailSender`)
+keeps the door open for a future cloud provider swap without touching
+`modules/ai`'s business logic — flagged as an explicitly open question for
+production deployment (none of this project's free-tier targets can run
+even a small local model well).
+
+Deliberately diverges from the search consumer's pattern in one place: on
+any failure (Ollama unreachable, timeout, unparseable response after one
+bounded retry), `modules/ai/consumer.ts` catches it internally and writes a
+`FAILED` valuation with an error message, rather than throwing into Kafka's
+generic DLQ handling — nothing in this project currently inspects any
+`-dlq` topic, so a visible `FAILED` status the seller can retry (`POST
+.../valuation/regenerate`) is strictly better UX than a silent dead end.
+Also applies ADR-0031's lesson directly instead of repeating it: rather than
+needing a separate backfill script for auctions that predate this feature,
+`GET .../valuation` lazily creates and triggers a `PENDING` valuation the
+first time it's requested for a row-less auction. Seller-only (never public)
+— showing a bidder "the AI thinks this is worth less" would work against
+the seller for no product reason. A new `aiRegenerateRateLimit` (5/10min per
+user) protects the single shared Ollama container from being hammered,
+mirroring `bidRateLimit`'s "this specific action has an unusually expensive
+cost profile" justification.
+
+179/179 tests passing (165 prior + 14 new: HTTP-layer authorization/
+lazy-backfill/regenerate coverage, plus pure-function unit tests for the
+USD→cents conversion and the price-range consistency clamp). Verified live
+against the REAL Ollama container, twice — a text-only auction and a
+second auction with a real uploaded image (via the existing MEDIA-001
+presign flow) both completed end-to-end, the image case visibly slower in
+a way that confirms the image was actually fetched/encoded/sent, not
+silently skipped. **A real bug found and fixed during this exact live
+verification**: the first live attempt failed validation because moondream
+reliably returns valid JSON but sometimes leaves `explanation` as `""` —
+the Zod schema's `.min(1)` treated that as unparseable output, discarding
+an otherwise-usable numeric result. Fixed by allowing an empty string with
+an honest fallback message, re-verified live afterward. **The quality
+caveat stated up front in ADR-0032 is not theoretical**: the model's live
+estimate for a real "Vintage Rolex Submariner" test listing was $0.13 —
+the pipeline worked exactly as designed; the model's actual pricing
+knowledge is just this weak, which is the accepted, disclosed cost of the
+free/local choice, not a bug to hide or hand-tune away.
+
+---
 
 **TASK SEARCH-003 — Three real bugs reported directly from live usage, all
 fixed (ADR-0031)** → **complete, not committed yet**. (1) The search box

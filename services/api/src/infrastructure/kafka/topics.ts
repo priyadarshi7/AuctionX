@@ -16,3 +16,11 @@ import { env } from '../../config/env';
 // test run still polluted the real index, because it was reading the
 // SAME topic the test just published to.
 export const SEARCH_EVENTS_TOPIC = env.NODE_ENV === 'test' ? 'search-events-test' : 'search-events';
+
+// Same test-scoping reasoning as SEARCH_EVENTS_TOPIC (ADR-0031) — a
+// dedicated topic (not 'auction-events') for the exact same DLQ-signal-
+// isolation reason modules/search/consumer.ts documents, AND test-scoped so
+// a live dev server's AI valuation consumer never independently receives
+// (and burns real Ollama CPU time on) a test run's own auction-creation
+// events.
+export const AI_VALUATION_EVENTS_TOPIC = env.NODE_ENV === 'test' ? 'ai-valuation-events-test' : 'ai-valuation-events';

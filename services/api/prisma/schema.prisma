@@ -180,8 +180,9 @@ model Auction {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  bids  Bid[]
-  order Order?
+  bids      Bid[]
+  order     Order?
+  valuation AuctionValuation?
 
   @@index([sellerId])
   @@index([status])
@@ -189,6 +190,55 @@ model Auction {
   // auctions whose endTime has passed.
   @@index([status, endTime])
   @@map("auctions")
+}
+
+enum ValuationStatus {
+  PENDING
+  COMPLETE
+  FAILED
+}
+
+// Phase 10 (Section 20/22, ADR-0032): AI-assisted valuation, computed
+// asynchronously off Kafka — never on the auction-creation critical path
+// (Section 24). One row per auction (@unique), created PENDING in the SAME
+// transaction as the auction itself (modules/auctions/repository.ts's
+// createAuction), then filled in by modules/ai/consumer.ts once the model
+// call completes.
+//
+// The price fields and confidence are all nullable together: they're only
+// meaningful once status is COMPLETE. A FAILED row keeps errorMessage for
+// display and leaves the price fields null rather than a stale/fabricated
+// zero.
+//
+// onDelete: Cascade, not Restrict like Auction.seller — this is a derived AI
+// artifact tied 1:1 to its auction, not an independent business record (the
+// same distinction Notification already draws for its own Cascade). Nothing
+// in this schema currently deletes an Auction anyway.
+model AuctionValuation {
+  id        String          @id @default(uuid())
+  auctionId String          @unique
+  auction   Auction         @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  status    ValuationStatus @default(PENDING)
+
+  estimatedValueCents Int?
+  priceRangeLowCents  Int?
+  priceRangeHighCents Int?
+  // 0..1, the model's own self-reported confidence — inherently a soft
+  // signal from a small local model, shown to the seller as a rough
+  // indicator, never treated as a statistical guarantee anywhere in this
+  // codebase.
+  confidence          Float?
+  explanation         String?
+  // Which model produced this result (e.g. "moondream") — kept per-row
+  // rather than assumed globally, since OLLAMA_VALUATION_MODEL can change
+  // between when different rows were generated.
+  model               String?
+  errorMessage        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("auction_valuations")
 }
 
 enum OrderStatus {

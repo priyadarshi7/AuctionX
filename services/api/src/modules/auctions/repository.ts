@@ -1,7 +1,7 @@
 import type { Auction, AuctionCategory, AuctionCondition, AuctionStatus, Prisma } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma';
 import { createOutboxEventInTx } from '../../infrastructure/outbox/repository';
-import { SEARCH_EVENTS_TOPIC } from '../../infrastructure/kafka/topics';
+import { AI_VALUATION_EVENTS_TOPIC, SEARCH_EVENTS_TOPIC } from '../../infrastructure/kafka/topics';
 
 // Phase 9 (Section 25/ADR-0029): every function in this file that changes
 // a field the search index cares about publishes this SAME lightweight
@@ -37,10 +37,25 @@ export type NewAuction = {
 // publish the reindex event atomically with the row's existence — see the
 // comment on publishReindexEvent below for why every mutation in this file
 // does the same.
+//
+// Also creates the auction's AuctionValuation row here directly (PENDING),
+// rather than importing anything from modules/ai — same precedent as Order
+// being created directly inside closeAuctionIfExpired below (schema.prisma's
+// own comment on Order: "not via an event/outbox... a second write inside
+// the same transaction is strictly simpler"). modules/ai/consumer.ts is the
+// only thing that ever needs to know Ollama exists; this file only needs to
+// know "an auction was just created, tell that consumer to go value it,"
+// the exact same decoupling publishReindexEvent already uses for search.
 export function createAuction(data: NewAuction): Promise<Auction> {
   return prisma.$transaction(async (tx) => {
     const auction = await tx.auction.create({ data });
     await publishReindexEvent(tx, auction.id);
+    await tx.auctionValuation.create({ data: { auctionId: auction.id, status: 'PENDING' } });
+    await createOutboxEventInTx(tx, {
+      topic: AI_VALUATION_EVENTS_TOPIC,
+      key: auction.id,
+      payload: { type: 'auction.valuate', auctionId: auction.id },
+    });
     return auction;
   });
 }
