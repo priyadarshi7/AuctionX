@@ -1,0 +1,120 @@
+import type { AuctionStatus, Bid } from '@prisma/client';
+import { prisma } from '../../infrastructure/database/prisma';
+import { computeExtendedEndTime } from './antiSniping';
+
+export function findBidByIdempotencyKey(bidderId: string, idempotencyKey: string): Promise<Bid | null> {
+  return prisma.bid.findUnique({
+    where: { bidderId_idempotencyKey: { bidderId, idempotencyKey } },
+  });
+}
+
+// Newest-first is also highest-first (ADR-0011: every accepted bid exceeds
+// the previous one by construction), so this same query answers both "bid
+// history" and "who's currently winning" — the top row either way.
+export function listBidsForAuction(auctionId: string, limit: number): Promise<Bid[]> {
+  return prisma.bid.findMany({
+    where: { auctionId },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+  });
+}
+
+// Only the columns bid validation actually needs — never the full Auction
+// row, to keep the locked read (and therefore the lock's hold time) as
+// small as possible.
+export type LockedAuctionRow = {
+  id: string;
+  sellerId: string;
+  status: AuctionStatus;
+  currentPriceCents: number;
+  endTime: Date | null;
+};
+
+export type NewBidData = { bidderId: string; amountCents: number; idempotencyKey: string };
+
+export type PlaceBidResult = { bid: Bid; extended: boolean };
+
+// This is Section 10's bid pipeline made real, as ONE Postgres transaction:
+// lock the auction row, validate against what the lock guarantees is
+// current, persist the bid, update the auction (price, and — Section 18 —
+// possibly its schedule), commit. See ADR-0012 for why SELECT ... FOR
+// UPDATE (pessimistic locking) over optimistic versioning.
+//
+// `validate` is injected rather than hardcoded here so the actual business
+// rules (ownership, auction status, price) stay in service.ts, matching
+// every other module's layering — but it MUST run inside this function,
+// after the lock is acquired, or it would be checking against data another
+// transaction could still change before this one commits, reopening the
+// exact race this function exists to close. It receives `undefined` when
+// the auction doesn't exist and is expected to throw in that case too.
+export async function placeBidTransactionally(
+  auctionId: string,
+  bid: NewBidData,
+  validate: (auction: LockedAuctionRow | undefined) => void,
+): Promise<PlaceBidResult> {
+  return prisma.$transaction(async (tx) => {
+    // Prisma's query builder has no row-locking API, so this step is
+    // necessarily raw SQL. Every other concurrent bid attempt on THIS SAME
+    // auction row blocks here until this transaction commits or rolls
+    // back; concurrent attempts on OTHER auctions are entirely unaffected
+    // (a row lock, not a table lock).
+    const rows = await tx.$queryRaw<LockedAuctionRow[]>`
+      SELECT id, "sellerId", status, "currentPriceCents", "endTime"
+      FROM auctions
+      WHERE id = ${auctionId}
+      FOR UPDATE
+    `;
+
+    // Re-check idempotency AFTER acquiring the lock, not just before
+    // entering this transaction. Without this second check, a request that
+    // loses the race for the lock would validate its bid against the
+    // auction's price AFTER its own twin request (same idempotency key)
+    // already raised that price — rejecting a legitimate retry as "too low"
+    // instead of replaying the original result. This is what actually
+    // closes that race: every bid placement on this auction serializes
+    // behind this same row lock, so whichever request acquires it second is
+    // GUARANTEED to see any sibling's already-committed insert here, before
+    // running price validation against now-stale expectations.
+    const existing = await tx.bid.findUnique({
+      where: {
+        bidderId_idempotencyKey: { bidderId: bid.bidderId, idempotencyKey: bid.idempotencyKey },
+      },
+    });
+    if (existing) {
+      // A replay describes something that already happened — it never
+      // re-triggers a fresh extension of its own.
+      return { bid: existing, extended: false };
+    }
+
+    validate(rows[0]);
+    // validate() throws for every invalid case, including a missing row —
+    // reaching this line means it's safe to use non-null below.
+    const auction = rows[0] as LockedAuctionRow;
+
+    const created = await tx.bid.create({
+      data: {
+        auctionId,
+        bidderId: bid.bidderId,
+        amountCents: bid.amountCents,
+        idempotencyKey: bid.idempotencyKey,
+      },
+    });
+
+    // Anti-sniping (Section 18): computed and applied in the SAME
+    // transaction, under the SAME lock, as accepting the bid itself — "this
+    // must be handled atomically" means there must be no window where the
+    // bid is accepted but the extension hasn't happened yet (or vice
+    // versa), and there isn't one, because both writes commit together.
+    const extendedEndTime = auction.endTime ? computeExtendedEndTime(auction.endTime, new Date()) : null;
+
+    await tx.auction.update({
+      where: { id: auctionId },
+      data: {
+        currentPriceCents: bid.amountCents,
+        ...(extendedEndTime ? { endTime: extendedEndTime } : {}),
+      },
+    });
+
+    return { bid: created, extended: extendedEndTime !== null };
+  });
+}
