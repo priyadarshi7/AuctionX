@@ -17,6 +17,7 @@ import { uploadRoutes } from './modules/uploads/routes';
 import { orderRoutes } from './modules/orders/routes';
 import { paymentWebhookRoutes } from './modules/payments/routes';
 import { notificationRoutes } from './modules/notifications/routes';
+import { searchRoutes } from './modules/search/routes';
 
 export function createApp(): Express {
   const app = express();
@@ -82,6 +83,7 @@ export function createApp(): Express {
   app.use('/api/v1/uploads', uploadRoutes);
   app.use('/api/v1/orders', orderRoutes);
   app.use('/api/v1/notifications', notificationRoutes);
+  app.use('/api/v1/search', searchRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

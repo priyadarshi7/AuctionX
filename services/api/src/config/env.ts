@@ -16,7 +16,14 @@ const envSchema = z.object({
   // open — the app must still boot and serve traffic with no Redis
   // available at all, so a missing REDIS_URL can't be a fail-fast condition
   // the way a missing DATABASE_URL is.
-  REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
+  //
+  // Port 6380, not Redis's default 6379 (ADR-0028): on this dev machine,
+  // WSL2's automatic localhost-forwarding exposes an unrelated project's
+  // Redis at 127.0.0.1:6379, and Node's `localhost` resolution silently
+  // preferred that loopback-specific bind over Docker's own wildcard one
+  // for the same port. Matches docker-compose.yml's redis service, which
+  // maps ITS 6380 host port to the container's normal internal 6379.
+  REDIS_URL: z.string().min(1).default('redis://localhost:6380'),
   // Optional, same reasoning as REDIS_URL: password reset is a real feature
   // but not existential — auction browsing/bidding must still work with no
   // email provider configured. If unset, the app falls back to logging
@@ -64,6 +71,19 @@ const envSchema = z.object({
   // publisher and the notification consumer are affected, both of which
   // already retry indefinitely rather than crash the process.
   KAFKA_BROKERS: z.string().min(1).default('localhost:9092'),
+  // Section 30: register/login/refresh are pre-authentication, so this is
+  // keyed by IP alone (middleware/rateLimit.ts's authRateLimit) — every
+  // account tested from the same dev machine shares one bucket. Defaults to
+  // the real production-strict value; raise it in a local .env (never
+  // .env.example) when doing heavy manual testing, then drop the override
+  // when done so dev still exercises the real limit occasionally.
+  AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+  // Phase 9 (Section 25): search is a derived, eventually-consistent read
+  // model, never the source of truth (Postgres stays that) — same
+  // "must still boot with this unreachable" reasoning as REDIS_URL/
+  // KAFKA_BROKERS, so this gets a default instead of being required.
+  OPENSEARCH_URL: z.string().url().default('http://localhost:9200'),
+  OPENSEARCH_AUCTIONS_INDEX: z.string().min(1).default('auctions'),
 });
 
 // Parse and Check Schema

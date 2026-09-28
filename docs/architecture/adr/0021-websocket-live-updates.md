@@ -191,3 +191,5 @@ Signal-only WebSocket payload (not full data push):
 - Investigate the port-6379 Redis mismatch found during this task's live
   verification — determine what else on this machine is bound to that
   port, before it causes a real, confusing cross-project data collision.
+  **Resolved in ADR-0028**: root cause was a WSL2/Docker Desktop host-port
+  collision, fixed by moving this project's Redis to host port 6380.

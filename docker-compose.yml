@@ -20,12 +20,23 @@ services:
   # No volume: rate-limit counters are ephemeral and non-critical (Redis is
   # never the source of truth, CLAUDE.md Section 12) — losing them on
   # restart just resets everyone's throttle window, which is harmless.
+  #
+  # Host port deliberately NOT 6379 (ADR-0028): on this dev machine, WSL2's
+  # own automatic localhost-forwarding (wslrelay.exe) exposes some other
+  # project's native Redis at 127.0.0.1:6379, bound more specifically than
+  # this container's wildcard (0.0.0.0:6379) publish via Docker Desktop's
+  # forwarder — Windows/Node's `localhost` resolution picks the more
+  # specific loopback bind, so the app was silently talking to a different,
+  # unrelated Redis instance the entire time. The container's own internal
+  # port stays 6379 (Redis's real default, irrelevant to the host) — only
+  # the host-side mapping moves, to a port nothing else on this machine has
+  # claimed.
   redis:
     image: redis:7-alpine
     container_name: auctionx-redis
     restart: unless-stopped
     ports:
-      - '6379:6379'
+      - '6380:6379'
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
@@ -136,7 +147,47 @@ services:
       timeout: 5s
       retries: 10
 
+  # OpenSearch: Phase 9 (Section 25) search. Verified with a real
+  # `docker pull` + start + `_cluster/health` before adopting it (same
+  # discipline as Redpanda/s3mock) — a genuine concern given this project's
+  # history of Docker/WSL2 startup friction (the redis port-6379 collision,
+  # ADR-0028), and OpenSearch/Elasticsearch's own documented history of
+  # needing a bumped `vm.max_map_count` on Linux hosts. Neither problem
+  # showed up here: this machine's Docker Desktop WSL2 VM already has
+  # enough headroom, cluster went GREEN in ~10s. Single-node, security
+  # plugin disabled (`DISABLE_SECURITY_PLUGIN`) — no TLS/password setup for
+  # a local dev instance nothing external can reach, same reasoning as
+  # every other piece of local infra here. Heap capped at 512m
+  # (OPENSEARCH_JAVA_OPTS) — this is a single small index at dev scale, not
+  # tuned for production ingest volume.
+  #
+  # Unlike Redis (ADR-0005's genuinely-ephemeral rate-limit counters), this
+  # DOES get a volume: the index is fully rebuildable from Postgres (Section
+  # 25's own diagram — it's derived data, never source of truth), but
+  # losing it on every container restart during normal dev work would mean
+  # re-running a full reindex just to get search results back, which is
+  # real dev-workflow friction the s3mock precedent already established is
+  # worth avoiding with a volume.
+  opensearch:
+    image: opensearchproject/opensearch:2
+    container_name: auctionx-opensearch
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: 'true'
+      OPENSEARCH_JAVA_OPTS: '-Xms512m -Xmx512m'
+    ports:
+      - '9200:9200'
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    healthcheck:
+      test: ['CMD-SHELL', "curl -s http://localhost:9200/_cluster/health | grep -qE '\"status\":\"(green|yellow)\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
 volumes:
   postgres_data:
   s3mock_data:
   redpanda_data:
+  opensearch_data:

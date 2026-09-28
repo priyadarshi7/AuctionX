@@ -89,7 +89,6 @@ export function rateLimit(options: RateLimitOptions) {
 
 const API_RATE_LIMIT_AUTHENTICATED_MAX = 300;
 const API_RATE_LIMIT_ANONYMOUS_MAX = 60;
-const AUTH_RATE_LIMIT_MAX = 10;
 
 // The whole Jest suite runs many more than 10 register/login/refresh calls
 // against the same test-runner "IP" inside one 15-minute Redis window
@@ -124,7 +123,7 @@ export const apiRateLimit = rateLimit({
 // than IP (Section 30: "Login: strict").
 export const authRateLimit = rateLimit({
   windowSeconds: 15 * 60,
-  max: isTestEnv ? TEST_ENV_MAX : AUTH_RATE_LIMIT_MAX,
+  max: isTestEnv ? TEST_ENV_MAX : env.AUTH_RATE_LIMIT_MAX,
   keyPrefix: 'auth',
   keyBy: (req) => `ip:${req.ip ?? 'unknown'}`,
 });

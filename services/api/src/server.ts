@@ -13,6 +13,8 @@ import { startWebSocketGateway, stopWebSocketGateway } from './infrastructure/we
 import { ensureBucketExists } from './infrastructure/storage/s3Client';
 import { connectProducer, disconnectProducer } from './infrastructure/kafka/producer';
 import { startNotificationsConsumer, stopNotificationsConsumer } from './modules/notifications/consumer';
+import { startSearchConsumer, stopSearchConsumer } from './modules/search/consumer';
+import { ensureAuctionIndex } from './modules/search/repository';
 
 const app = createApp();
 
@@ -40,6 +42,14 @@ void ensureBucketExists();
 void connectProducer();
 startOutboxPublisherWorker();
 startNotificationsConsumer();
+// Search (Phase 9, ADR-0029): same fire-and-forget/no-throw treatment as
+// ensureBucketExists — the index bootstrap must never block boot, and
+// startSearchConsumer's own connect() retries internally exactly like
+// startNotificationsConsumer's does.
+void ensureAuctionIndex().catch((err: unknown) => {
+  logger.error({ err }, 'Failed to ensure OpenSearch auction index exists');
+});
+startSearchConsumer();
 
 // Graceful shutdown: stop accepting new connections, let in-flight requests
 // finish, close the DB pool and Redis connection, then exit (Section 69).
@@ -65,6 +75,9 @@ function shutdown(signal: string): void {
   stopWebSocketGateway();
   void stopNotificationsConsumer().catch((err: unknown) => {
     logger.error({ err }, 'Error stopping notifications consumer');
+  });
+  void stopSearchConsumer().catch((err: unknown) => {
+    logger.error({ err }, 'Error stopping search consumer');
   });
   server.close((err) => {
     if (err) {

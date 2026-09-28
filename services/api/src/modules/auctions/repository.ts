@@ -2,6 +2,23 @@ import type { Auction, AuctionCategory, AuctionCondition, AuctionStatus, Prisma 
 import { prisma } from '../../infrastructure/database/prisma';
 import { createOutboxEventInTx } from '../../infrastructure/outbox/repository';
 
+// Phase 9 (Section 25/ADR-0029): every function in this file that changes
+// a field the search index cares about publishes this SAME lightweight
+// signal, in the SAME transaction as the write — the point isn't to carry
+// data in the event (it carries only the id), it's to tell
+// modules/search/consumer.ts "go re-read this auction and reindex it,"
+// which it does from Postgres directly. A dedicated 'search-events' topic,
+// not 'auction-events' — see that consumer's own comment for why sharing
+// a topic with modules/notifications/consumer.ts would corrupt ITS DLQ
+// signal.
+function publishReindexEvent(tx: Prisma.TransactionClient, auctionId: string): Promise<unknown> {
+  return createOutboxEventInTx(tx, {
+    topic: 'search-events',
+    key: auctionId,
+    payload: { type: 'auction.reindex', auctionId },
+  });
+}
+
 export type NewAuction = {
   sellerId: string;
   title: string;
@@ -14,8 +31,16 @@ export type NewAuction = {
   currentPriceCents: number;
 };
 
+// Wrapped in a transaction (vs. a bare prisma.auction.create) purely to
+// publish the reindex event atomically with the row's existence — see the
+// comment on publishReindexEvent below for why every mutation in this file
+// does the same.
 export function createAuction(data: NewAuction): Promise<Auction> {
-  return prisma.auction.create({ data });
+  return prisma.$transaction(async (tx) => {
+    const auction = await tx.auction.create({ data });
+    await publishReindexEvent(tx, auction.id);
+    return auction;
+  });
 }
 
 export function findAuctionById(id: string): Promise<Auction | null> {
@@ -90,30 +115,50 @@ export type AuctionPatch = Partial<{
 }>;
 
 export function updateAuctionRow(id: string, patch: AuctionPatch): Promise<Auction> {
-  return prisma.auction.update({ where: { id }, data: patch });
+  return prisma.$transaction(async (tx) => {
+    const auction = await tx.auction.update({ where: { id }, data: patch });
+    await publishReindexEvent(tx, id);
+    return auction;
+  });
 }
 
 export function publishAuctionRow(id: string, schedule: { startTime: Date; endTime: Date }): Promise<Auction> {
-  return prisma.auction.update({
-    where: { id },
-    data: { status: 'PUBLISHED', startTime: schedule.startTime, endTime: schedule.endTime },
+  return prisma.$transaction(async (tx) => {
+    const auction = await tx.auction.update({
+      where: { id },
+      data: { status: 'PUBLISHED', startTime: schedule.startTime, endTime: schedule.endTime },
+    });
+    await publishReindexEvent(tx, id);
+    return auction;
   });
 }
 
 export function startAuctionRow(id: string): Promise<Auction> {
-  return prisma.auction.update({ where: { id }, data: { status: 'ACTIVE' } });
+  return prisma.$transaction(async (tx) => {
+    const auction = await tx.auction.update({ where: { id }, data: { status: 'ACTIVE' } });
+    await publishReindexEvent(tx, id);
+    return auction;
+  });
 }
 
 export function pauseAuctionRow(id: string): Promise<Auction> {
-  return prisma.auction.update({ where: { id }, data: { status: 'PAUSED' } });
+  return prisma.$transaction(async (tx) => {
+    const auction = await tx.auction.update({ where: { id }, data: { status: 'PAUSED' } });
+    await publishReindexEvent(tx, id);
+    return auction;
+  });
 }
 
 // endedAt records the real end moment, distinct from the scheduled endTime
 // (ADR-0007) — a cancellation is precisely the case where they diverge.
 export function cancelAuctionRow(id: string): Promise<Auction> {
-  return prisma.auction.update({
-    where: { id },
-    data: { status: 'CANCELLED', endedAt: new Date() },
+  return prisma.$transaction(async (tx) => {
+    const auction = await tx.auction.update({
+      where: { id },
+      data: { status: 'CANCELLED', endedAt: new Date() },
+    });
+    await publishReindexEvent(tx, id);
+    return auction;
   });
 }
 
@@ -199,6 +244,10 @@ export async function closeAuctionIfExpired(auctionId: string, now: Date): Promi
       where: { id: auctionId },
       data: { status: 'ENDED', endedAt: now },
     });
+    // Unconditional across all three outcomes (SOLD/RESERVE_NOT_MET/
+    // NO_BIDS) — status just changed to ENDED either way, which the search
+    // index needs to reflect regardless of which outcome this was.
+    await publishReindexEvent(tx, auctionId);
 
     let orderId: string | null = null;
 

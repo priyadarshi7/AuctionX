@@ -1,7 +1,23 @@
-import type { AuctionStatus, Bid } from '@prisma/client';
+import type { AuctionStatus, Bid, Prisma } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma';
 import { createOutboxEventInTx } from '../../infrastructure/outbox/repository';
 import { computeExtendedEndTime } from './antiSniping';
+
+// Phase 9 (ADR-0029): every accepted bid changes currentPriceCents, which
+// the search index needs to reflect — unlike 'bid.outbid' below, this must
+// fire for EVERY genuine new bid, including the very first one on an
+// auction (which has no previous bidder to outbid, so that event is
+// skipped entirely) and a bidder re-outbidding themselves (also skipped
+// below). Dedicated 'search-events' topic — see modules/search/
+// consumer.ts's comment for why this can't share 'bid-events'/
+// 'auction-events' with modules/notifications/consumer.ts.
+function publishReindexEvent(tx: Prisma.TransactionClient, auctionId: string): Promise<unknown> {
+  return createOutboxEventInTx(tx, {
+    topic: 'search-events',
+    key: auctionId,
+    payload: { type: 'auction.reindex', auctionId },
+  });
+}
 
 export function findBidByIdempotencyKey(bidderId: string, idempotencyKey: string): Promise<Bid | null> {
   return prisma.bid.findUnique({
@@ -126,6 +142,7 @@ export async function placeBidTransactionally(
         ...(extendedEndTime ? { endTime: extendedEndTime } : {}),
       },
     });
+    await publishReindexEvent(tx, auctionId);
 
     // No event for the auction's own seller placing the first bid against
     // themselves (impossible anyway — assertBidIsAcceptable blocks shill
