@@ -1,6 +1,7 @@
 import type { Bid } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { notifyAuctionChanged } from '../../infrastructure/realtime/auctionEvents';
+import { pushNotification } from '../../infrastructure/realtime/notificationEvents';
 import { logger } from '../../infrastructure/observability/logger';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../middleware/errors';
 import { getAuctionForViewer, type RequestingUser } from '../auctions/service';
@@ -69,10 +70,11 @@ export async function placeBid(
   // needed here — nothing is being decided, only returned — which keeps a
   // stream of retries from adding to contention on a hot auction's row. A
   // replay never re-triggers a fresh anti-sniping extension of its own —
-  // it's the SAME original acceptance, not a new event.
+  // it's the SAME original acceptance, not a new event — and by the same
+  // logic never re-sends the outbid notification either.
   const existing = await findBidByIdempotencyKey(bidderId, input.idempotencyKey);
   if (existing) {
-    return { bid: existing, extended: false };
+    return { bid: existing, extended: false, outbidNotification: undefined };
   }
 
   try {
@@ -88,6 +90,14 @@ export async function placeBid(
     // mutation" signal worth threading back out here just to skip a cheap
     // no-op) — a subscribed watcher just refetches and gets identical data.
     await notifyAuctionChanged(auctionId, 'bid');
+    // Pushed only after the transaction that created it has committed
+    // (Section 39/notification model comment) — the Notification row
+    // itself, created inside placeBidTransactionally, is already durable
+    // by this point regardless of whether anyone is connected to receive
+    // this push.
+    if (result.outbidNotification) {
+      pushNotification(result.outbidNotification);
+    }
     return result;
   } catch (err) {
     // Two concurrent requests with the SAME (bidderId, idempotencyKey)
@@ -109,7 +119,7 @@ export async function placeBid(
           { bidderId, auctionId },
           'bid.idempotent_replay_after_cross_auction_key_reuse_race',
         );
-        return { bid, extended: false };
+        return { bid, extended: false, outbidNotification: undefined };
       }
     }
     throw err;

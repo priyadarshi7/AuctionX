@@ -1,5 +1,6 @@
-import type { AuctionStatus, Bid } from '@prisma/client';
+import type { AuctionStatus, Bid, Notification } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma';
+import { createNotificationInTx } from '../notifications/repository';
 import { computeExtendedEndTime } from './antiSniping';
 
 export function findBidByIdempotencyKey(bidderId: string, idempotencyKey: string): Promise<Bid | null> {
@@ -32,7 +33,7 @@ export type LockedAuctionRow = {
 
 export type NewBidData = { bidderId: string; amountCents: number; idempotencyKey: string };
 
-export type PlaceBidResult = { bid: Bid; extended: boolean };
+export type PlaceBidResult = { bid: Bid; extended: boolean; outbidNotification: Notification | undefined };
 
 // This is Section 10's bid pipeline made real, as ONE Postgres transaction:
 // lock the auction row, validate against what the lock guarantees is
@@ -82,14 +83,25 @@ export async function placeBidTransactionally(
     });
     if (existing) {
       // A replay describes something that already happened — it never
-      // re-triggers a fresh extension of its own.
-      return { bid: existing, extended: false };
+      // re-triggers a fresh extension of its own, and (same reasoning)
+      // never re-notifies whoever it outbid the first time either.
+      return { bid: existing, extended: false, outbidNotification: undefined };
     }
 
     validate(rows[0]);
     // validate() throws for every invalid case, including a missing row —
     // reaching this line means it's safe to use non-null below.
     const auction = rows[0] as LockedAuctionRow;
+
+    // Read BEFORE inserting the new bid, under the same lock — this is who
+    // this specific bid is about to outbid. Doing this after insert (or
+    // after commit) would be a real race: another bid could land in
+    // between and make "the 2nd-highest bid" answer a different question
+    // than "who did THIS bid just beat."
+    const previousHighestBid = await tx.bid.findFirst({
+      where: { auctionId },
+      orderBy: { createdAt: 'desc' },
+    });
 
     const created = await tx.bid.create({
       data: {
@@ -115,6 +127,21 @@ export async function placeBidTransactionally(
       },
     });
 
-    return { bid: created, extended: extendedEndTime !== null };
+    // No notification for the auction's own seller placing the first bid
+    // against themselves (impossible anyway — assertBidIsAcceptable blocks
+    // shill bidding) or for a bidder immediately re-outbidding themselves
+    // (bidderId === previousHighestBid.bidderId — nothing useful to tell
+    // them).
+    let outbidNotification: Notification | undefined;
+    if (previousHighestBid && previousHighestBid.bidderId !== bid.bidderId) {
+      outbidNotification = await createNotificationInTx(tx, {
+        userId: previousHighestBid.bidderId,
+        type: 'OUTBID',
+        auctionId,
+        data: { previousAmountCents: previousHighestBid.amountCents, newAmountCents: bid.amountCents },
+      });
+    }
+
+    return { bid: created, extended: extendedEndTime !== null, outbidNotification };
   });
 }

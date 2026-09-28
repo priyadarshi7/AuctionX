@@ -1,5 +1,7 @@
 import type { Payment, PaymentStatus } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma';
+import { createNotificationInTx } from '../notifications/repository';
+import { pushNotification } from '../../infrastructure/realtime/notificationEvents';
 
 // PENDING or SUCCEEDED both count as "active" — if either exists, don't
 // start a second payment attempt for this order (PENDING: one's already in
@@ -48,7 +50,7 @@ export async function applyPaymentWebhookEvent(
   providerRef: string,
   outcome: 'SUCCEEDED' | 'FAILED',
 ): Promise<ApplyWebhookResult> {
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const rows = await tx.$queryRaw<LockedPaymentRow[]>`
       SELECT id, "orderId", status
       FROM payments
@@ -57,15 +59,33 @@ export async function applyPaymentWebhookEvent(
     `;
     const payment = rows[0];
     if (!payment || payment.status !== 'PENDING') {
-      return { applied: false };
+      return { applied: false, notification: undefined };
     }
 
     await tx.payment.update({ where: { id: payment.id }, data: { status: outcome } });
 
+    let notification;
     if (outcome === 'SUCCEEDED') {
-      await tx.order.update({ where: { id: payment.orderId }, data: { status: 'PAID' } });
+      // .update() already returns the full updated row — no extra read
+      // needed to get sellerId/amountCents for the notification below.
+      const updatedOrder = await tx.order.update({ where: { id: payment.orderId }, data: { status: 'PAID' } });
+      notification = await createNotificationInTx(tx, {
+        userId: updatedOrder.sellerId,
+        type: 'PAYMENT_RECEIVED',
+        auctionId: updatedOrder.auctionId,
+        orderId: updatedOrder.id,
+        data: { amountCents: updatedOrder.amountCents },
+      });
     }
 
-    return { applied: true };
+    return { applied: true, notification };
   });
+
+  // Pushed only after commit — same reasoning as the other two trigger
+  // sites (bids/repository.ts, auctions/repository.ts).
+  if (result.notification) {
+    pushNotification(result.notification);
+  }
+
+  return { applied: result.applied };
 }

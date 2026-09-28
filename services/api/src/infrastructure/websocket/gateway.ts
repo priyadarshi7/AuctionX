@@ -76,6 +76,14 @@ const connectionState = new Map<WebSocket, ConnectionState>();
 // there is more than one gateway instance to broadcast across; premature
 // today (Section 4) since nothing here scales horizontally yet.
 const rooms = new Map<string, Set<WebSocket>>();
+// userId -> every currently-connected socket authenticated as that user
+// (a user can have more than one open tab/device). Unlike `rooms`, there is
+// no explicit subscribe message for this — a client joins its own user room
+// automatically the moment it successfully authenticates (see the `auth`
+// branch in handleMessage), since "deliver my notifications to me" isn't an
+// opt-in the way watching a specific auction is. Same single-instance,
+// in-memory caveat as `rooms` above.
+const userRooms = new Map<string, Set<WebSocket>>();
 
 function send(ws: WebSocket, payload: unknown): void {
   if (ws.readyState === WebSocket.OPEN) {
@@ -108,6 +116,15 @@ function unsubscribe(ws: WebSocket, state: ConnectionState, auctionId: string): 
   send(ws, { type: 'unsubscribed', auctionId });
 }
 
+function joinUserRoom(ws: WebSocket, userId: string): void {
+  let room = userRooms.get(userId);
+  if (!room) {
+    room = new Set();
+    userRooms.set(userId, room);
+  }
+  room.add(ws);
+}
+
 function cleanupConnection(ws: WebSocket): void {
   const state = connectionState.get(ws);
   if (!state) {
@@ -118,6 +135,13 @@ function cleanupConnection(ws: WebSocket): void {
     room?.delete(ws);
     if (room && room.size === 0) {
       rooms.delete(auctionId);
+    }
+  }
+  if (state.userId) {
+    const userRoom = userRooms.get(state.userId);
+    userRoom?.delete(ws);
+    if (userRoom && userRoom.size === 0) {
+      userRooms.delete(state.userId);
     }
   }
   connectionState.delete(ws);
@@ -166,6 +190,7 @@ function handleMessage(ws: WebSocket, state: ConnectionState, raw: string): void
       const claims = verifyAccessToken(message.accessToken);
       state.authenticated = true;
       state.userId = claims.sub;
+      joinUserRoom(ws, claims.sub);
       send(ws, { type: 'auth.ok' });
     } catch {
       // A client that bothered to present a token gets a clear signal its
@@ -290,6 +315,7 @@ export function stopWebSocketGateway(): void {
   wss = undefined;
   connectionState.clear();
   rooms.clear();
+  userRooms.clear();
 }
 
 // Called by `infrastructure/realtime/auctionEvents.ts`'s `notifyAuctionChanged`
@@ -299,6 +325,24 @@ export function stopWebSocketGateway(): void {
 // mechanics of HOW fanout works stay here.
 export function broadcastToAuction(auctionId: string, payload: unknown): void {
   const room = rooms.get(auctionId);
+  if (!room) {
+    return;
+  }
+  const message = JSON.stringify(payload);
+  for (const ws of room) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(message);
+    }
+  }
+}
+
+// Called by infrastructure/realtime/notificationEvents.ts after a
+// Notification row commits. Best-effort only: if the user has no currently
+// connected socket (or none that ever authenticated), this is a silent
+// no-op — the Notification row itself, not this push, is what the user
+// sees on their next visit (module comment on the Notification model).
+export function pushToUser(userId: string, payload: unknown): void {
+  const room = userRooms.get(userId);
   if (!room) {
     return;
   }

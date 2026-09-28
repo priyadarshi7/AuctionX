@@ -1,5 +1,7 @@
-import type { Auction, AuctionCategory, AuctionCondition, AuctionStatus, Prisma } from '@prisma/client';
+import type { Auction, AuctionCategory, AuctionCondition, AuctionStatus, Notification, Prisma } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma';
+import { createNotificationInTx } from '../notifications/repository';
+import { pushNotification } from '../../infrastructure/realtime/notificationEvents';
 
 export type NewAuction = {
   sellerId: string;
@@ -150,6 +152,8 @@ export type CloseAuctionResult =
   | { closed: false; outcome: null; winningBidId: null; orderId: null }
   | { closed: true; outcome: CloseAuctionOutcome; winningBidId: string | null; orderId: string | null };
 
+type CloseAuctionTxResult = CloseAuctionResult & { notifications: Notification[] };
+
 // Section 17's closing workflow as one transaction: lock the auction (same
 // mechanism and same row bid placement locks — see ADR-0012 — so a bid
 // arriving at the same instant serializes against this automatically),
@@ -164,7 +168,7 @@ export type CloseAuctionResult =
 // means a second attempt could never create a duplicate Order even if this
 // guard were somehow bypassed.
 export async function closeAuctionIfExpired(auctionId: string, now: Date): Promise<CloseAuctionResult> {
-  return prisma.$transaction(async (tx) => {
+  const result: CloseAuctionTxResult = await prisma.$transaction(async (tx) => {
     const rows = await tx.$queryRaw<LockedAuctionForClosing[]>`
       SELECT id, "sellerId", status, "endTime", "reservePriceCents"
       FROM auctions
@@ -174,10 +178,10 @@ export async function closeAuctionIfExpired(auctionId: string, now: Date): Promi
     const auction = rows[0];
 
     if (!auction || (auction.status !== 'ACTIVE' && auction.status !== 'PAUSED')) {
-      return { closed: false, outcome: null, winningBidId: null, orderId: null };
+      return { closed: false, outcome: null, winningBidId: null, orderId: null, notifications: [] };
     }
     if (!auction.endTime || auction.endTime > now) {
-      return { closed: false, outcome: null, winningBidId: null, orderId: null };
+      return { closed: false, outcome: null, winningBidId: null, orderId: null, notifications: [] };
     }
 
     // Reading Bid from within the Auctions module mirrors the same
@@ -200,6 +204,8 @@ export async function closeAuctionIfExpired(auctionId: string, now: Date): Promi
     });
 
     let orderId: string | null = null;
+    const notifications: Notification[] = [];
+
     if (outcome === 'SOLD' && highestBid) {
       const order = await tx.order.create({
         data: {
@@ -211,8 +217,47 @@ export async function closeAuctionIfExpired(auctionId: string, now: Date): Promi
         },
       });
       orderId = order.id;
-    }
 
-    return { closed: true, outcome, winningBidId: highestBid?.id ?? null, orderId };
+      notifications.push(
+        await createNotificationInTx(tx, {
+          userId: highestBid.bidderId,
+          type: 'AUCTION_WON',
+          auctionId,
+          orderId: order.id,
+          data: { amountCents: highestBid.amountCents },
+        }),
+        await createNotificationInTx(tx, {
+          userId: auction.sellerId,
+          type: 'AUCTION_SOLD',
+          auctionId,
+          orderId: order.id,
+          data: { amountCents: highestBid.amountCents },
+        }),
+      );
+    } else if (outcome === 'RESERVE_NOT_MET') {
+      notifications.push(
+        await createNotificationInTx(tx, {
+          userId: auction.sellerId,
+          type: 'AUCTION_RESERVE_NOT_MET',
+          auctionId,
+          data: { highestBidCents: highestBid?.amountCents ?? null, reservePriceCents: auction.reservePriceCents },
+        }),
+      );
+    }
+    // NO_BIDS: deliberately no notification — "nobody bid on your auction"
+    // isn't actionable the way the other outcomes are.
+
+    return { closed: true, outcome, winningBidId: highestBid?.id ?? null, orderId, notifications };
   });
+
+  // Pushed only after the transaction above has committed (Section 39 /
+  // the Notification model's doc comment) — same reasoning as
+  // notifyAuctionChanged already being called from outside its own
+  // triggering transaction.
+  for (const notification of result.notifications) {
+    pushNotification(notification);
+  }
+
+  const { notifications: _notifications, ...closeResult } = result;
+  return closeResult;
 }

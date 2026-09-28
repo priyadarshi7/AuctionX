@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { logoutRequest } from '@/lib/auth';
 import { useAuthStore } from '@/store/authStore';
+import { NotificationBell } from './NotificationBell';
 
 export function NavBar() {
   const user = useAuthStore((state) => state.user);
@@ -39,6 +40,7 @@ export function NavBar() {
             <Link href="/orders" className="hover:text-gray-600">
               My orders
             </Link>
+            <NotificationBell />
             <span className="text-gray-700">
               Signed in as <span className="font-medium">{user.name}</span>
             </span>

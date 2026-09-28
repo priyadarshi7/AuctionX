@@ -38,6 +38,7 @@ model User {
   bids                Bid[]
   ordersAsSeller      Order[]              @relation("OrdersAsSeller")
   ordersAsBuyer       Order[]              @relation("OrdersAsBuyer")
+  notifications       Notification[]
 
   @@map("users")
 }
@@ -333,4 +334,56 @@ model Bid {
   @@index([auctionId, createdAt])
   @@index([bidderId])
   @@map("bids")
+}
+
+enum NotificationType {
+  OUTBID
+  AUCTION_WON
+  AUCTION_SOLD
+  AUCTION_RESERVE_NOT_MET
+  PAYMENT_RECEIVED
+}
+
+// Created synchronously, inside the SAME transaction as the event it
+// reports (a bid being outbid, an auction closing, a payment webhook
+// succeeding) — the same "no Outbox/Kafka needed yet, it's one Postgres
+// database" reasoning as Order (ADR-0023). This table is the source of
+// truth; a WebSocket push (infrastructure/websocket/gateway.ts's per-user
+// rooms) is a best-effort, additive notice on top of it for a currently-
+// connected client, never the only way a notification reaches someone —
+// Section 39: delayed is fine, lost is not.
+//
+// auctionId/orderId are plain nullable strings, NOT Prisma relations with
+// an enforced FK — unlike Order's relations (which protect real business
+// correctness), a notification is read-mostly UI convenience data. A
+// dangling reference here would be a rendering nuisance (a "view auction"
+// link that 404s), not a correctness bug, so it doesn't need the same
+// onDelete: Restrict machinery the rest of this schema uses for records
+// that matter financially. In practice nothing in this schema currently
+// deletes an Auction/Order anyway, so this is a deliberate simplification,
+// not a gap being papered over.
+model Notification {
+  id     String           @id @default(uuid())
+  userId String
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type   NotificationType
+
+  auctionId String?
+  orderId   String?
+  // Small, type-specific display data (e.g. the bid amount that outbid
+  // them, the sale price) — kept as one JSON column rather than a column
+  // per possible field across five different notification types, which
+  // would mean most rows leave most columns null. A notification's payload
+  // is read, never queried/filtered on, so there's no indexing reason to
+  // normalize it further.
+  data      Json
+
+  readAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  // Matches "give me this user's notifications, newest first" — the only
+  // query pattern this table serves.
+  @@index([userId, createdAt])
+  @@map("notifications")
 }

@@ -30,7 +30,11 @@ Payment domain (PAYMENT-001/002, ADR-0025 — provider port, mock provider,
 pay endpoint, webhook handling), and the frontend (`/orders`,
 `/orders/[id]` with a live-polling "Pay now" action) are all built and
 verified live in a real browser (login → orders list → pay → auto-flips to
-Paid via the ~300ms simulated webhook, no manual refresh).
+Paid via the ~300ms simulated webhook, no manual refresh). **Notifications**
+(Section 1/4's long-unbuilt Notification Module, ADR-0026) is now done:
+outbid/won/sold/reserve-not-met/payment-received notifications, persisted
+in Postgres and pushed live over a new per-user WebSocket room, with a
+notification bell in the frontend nav.
 
 ## Project location
 
@@ -54,6 +58,29 @@ this session (Storage Sense / WinDirStat — a shell-based `du` scan of
 a bad sign).
 
 ## Current Task
+
+**TASK NOTIF-001 — Notifications (ADR-0026)** → **complete**. Section 1/4's
+Notification Module, unbuilt until now: five triggers (`OUTBID`,
+`AUCTION_WON`, `AUCTION_SOLD`, `AUCTION_RESERVE_NOT_MET`,
+`PAYMENT_RECEIVED`), each created inside the SAME transaction as the event
+it reports (the outbid one specifically reads "who was previously
+winning" under bid placement's existing row lock, before inserting the new
+bid — doing this after commit would be a real race, since another bid
+could land in between and change the answer). `Notification` is a real
+Postgres table (source of truth); a new per-user WebSocket room
+(`infrastructure/websocket/gateway.ts`'s `userRooms`, joined automatically
+on `auth`) pushes it live on top, additively — a user with no open
+connection still sees it via `GET /api/v1/notifications` on their next
+visit. Frontend: a notification bell in the nav (unread badge, dropdown,
+mark-read/mark-all-read), an app-wide WebSocket hook mounted from the root
+layout so it survives page navigation. 162/162 tests passing (155 + 7
+new), build/lint clean, **verified live in a real browser**: logged in as
+one bidder, had a separate curl-driven bidder outbid them mid-session, and
+watched the unread badge appear with no page reload — a genuine push, not
+a polling artifact — then confirmed clicking it navigated correctly and
+cleared the unread count.
+
+---
 
 **TASK ORDER-001/002 — Order creation on auction close (ADR-0023)** →
 **complete**. Section 19's payment flow starts at `Auction End -> Winner ->
@@ -1754,6 +1781,7 @@ whenever the developer wants any of them.
 - `docs/architecture/adr/0023-order-creation-on-auction-close.md`
 - `docs/architecture/adr/0024-database-backup-incident.md`
 - `docs/architecture/adr/0025-payment-domain-and-mock-provider.md`
+- `docs/architecture/adr/0026-notifications.md`
 
 ## Known accepted issues
 
@@ -1824,10 +1852,16 @@ whenever the developer wants any of them.
   tradeoff for this pattern (not unique to this app); revisit with a
   scheduled cleanup job only if storage cost/clutter ever becomes a
   measured problem.
-- **Redis Pub/Sub fanout across WebSocket gateway instances** (ADR-0020) —
-  today's in-memory, per-process room map is correct only at one API
-  instance; add this the moment a second instance exists, not before
-  (Section 4).
+- **Redis Pub/Sub fanout across WebSocket gateway instances** (ADR-0020,
+  extended by ADR-0026's per-user `userRooms`) — today's in-memory,
+  per-process room maps (both the auction rooms and the newer per-user
+  ones) are correct only at one API instance; add this the moment a second
+  instance exists, not before (Section 4).
+- Email notifications — in-app + WebSocket (ADR-0026) covers an actively-
+  browsing user; an offline user only finds out on their next visit. The
+  `EmailSender` port (ADR-0006) already exists if this needs revisiting —
+  only worth it if real usage shows missed time-sensitive notifications
+  (e.g. slow payment after winning) are an actual problem.
 - Full edit form for a `DRAFT` auction's content (title/description/price/
   etc.) from the frontend — WEB-003's dashboard covers lifecycle actions
   (publish/start/pause/cancel) only, not editing; overlaps with the
