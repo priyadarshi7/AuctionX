@@ -1,6 +1,6 @@
-import type { AuctionStatus, Bid, Notification } from '@prisma/client';
+import type { AuctionStatus, Bid } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma';
-import { createNotificationInTx } from '../notifications/repository';
+import { createOutboxEventInTx } from '../../infrastructure/outbox/repository';
 import { computeExtendedEndTime } from './antiSniping';
 
 export function findBidByIdempotencyKey(bidderId: string, idempotencyKey: string): Promise<Bid | null> {
@@ -33,7 +33,7 @@ export type LockedAuctionRow = {
 
 export type NewBidData = { bidderId: string; amountCents: number; idempotencyKey: string };
 
-export type PlaceBidResult = { bid: Bid; extended: boolean; outbidNotification: Notification | undefined };
+export type PlaceBidResult = { bid: Bid; extended: boolean };
 
 // This is Section 10's bid pipeline made real, as ONE Postgres transaction:
 // lock the auction row, validate against what the lock guarantees is
@@ -84,8 +84,8 @@ export async function placeBidTransactionally(
     if (existing) {
       // A replay describes something that already happened — it never
       // re-triggers a fresh extension of its own, and (same reasoning)
-      // never re-notifies whoever it outbid the first time either.
-      return { bid: existing, extended: false, outbidNotification: undefined };
+      // never re-publishes an outbid event for it either.
+      return { bid: existing, extended: false };
     }
 
     validate(rows[0]);
@@ -127,21 +127,34 @@ export async function placeBidTransactionally(
       },
     });
 
-    // No notification for the auction's own seller placing the first bid
-    // against themselves (impossible anyway — assertBidIsAcceptable blocks
-    // shill bidding) or for a bidder immediately re-outbidding themselves
+    // No event for the auction's own seller placing the first bid against
+    // themselves (impossible anyway — assertBidIsAcceptable blocks shill
+    // bidding) or for a bidder immediately re-outbidding themselves
     // (bidderId === previousHighestBid.bidderId — nothing useful to tell
     // them).
-    let outbidNotification: Notification | undefined;
+    //
+    // Published via the Outbox (ADR-0027), not a direct Notification
+    // insert — this keeps the bid-placement transaction (Section 64's
+    // "critical path must stay fast") from doing the notification's own
+    // work; a consumer (modules/notifications/consumer.ts) does that
+    // asynchronously, off this transaction entirely. Keyed by auctionId,
+    // not bidderId — ordering matters per-auction (Section 15), since two
+    // outbid events for the same auction must be processed in the order
+    // they happened.
     if (previousHighestBid && previousHighestBid.bidderId !== bid.bidderId) {
-      outbidNotification = await createNotificationInTx(tx, {
-        userId: previousHighestBid.bidderId,
-        type: 'OUTBID',
-        auctionId,
-        data: { previousAmountCents: previousHighestBid.amountCents, newAmountCents: bid.amountCents },
+      await createOutboxEventInTx(tx, {
+        topic: 'bid-events',
+        key: auctionId,
+        payload: {
+          type: 'bid.outbid',
+          auctionId,
+          outbidUserId: previousHighestBid.bidderId,
+          previousAmountCents: previousHighestBid.amountCents,
+          newAmountCents: bid.amountCents,
+        },
       });
     }
 
-    return { bid: created, extended: extendedEndTime !== null, outbidNotification };
+    return { bid: created, extended: extendedEndTime !== null };
   });
 }

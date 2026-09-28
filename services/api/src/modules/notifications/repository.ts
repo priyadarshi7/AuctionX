@@ -1,24 +1,11 @@
-import type { Notification, NotificationType, Prisma } from '@prisma/client';
+import type { Notification } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma';
 
-export type NewNotification = {
-  userId: string;
-  type: NotificationType;
-  auctionId?: string;
-  orderId?: string;
-  data: Prisma.InputJsonValue;
-};
-
-// Takes the CALLER's transaction client, not the module-level `prisma`
-// singleton — every trigger site (bids/repository.ts, auctions/repository.ts,
-// payments/repository.ts) creates a Notification inside its OWN existing
-// transaction, so the notification's existence is atomically consistent
-// with the event it reports (see the Notification model's doc comment in
-// schema.prisma). Same pragmatic cross-module reach-in already used
-// elsewhere (Section 54) — e.g. bids/repository.ts locking the Auction row.
-export function createNotificationInTx(tx: Prisma.TransactionClient, data: NewNotification): Promise<Notification> {
-  return tx.notification.create({ data });
-}
+// Notification creation itself lives in modules/notifications/consumer.ts
+// now, not here (ADR-0027) — it's triggered by a Kafka message, not a
+// caller's own open transaction, so there's no `tx` to join and no reason
+// for a wrapper function here. This file stays the read/mark-read side of
+// the module's public surface.
 
 export function listNotificationsForUser(userId: string, limit: number): Promise<Notification[]> {
   return prisma.notification.findMany({

@@ -92,6 +92,51 @@ services:
       timeout: 5s
       retries: 10
 
+  # Redpanda: Kafka-API-compatible broker for Phase 7 (Section 15/16's
+  # Outbox -> Kafka -> consumer pattern, ADR-0027). Chosen over real Apache
+  # Kafka specifically for local dev: Kafka + Zookeeper (or even KRaft-mode
+  # Kafka) is a JVM broker with a meaningfully heavier disk/memory
+  # footprint, and this machine already has a real, previously-unexplained
+  # disk-space problem (see PROGRESS.md's "Project location" section) that
+  # turned out to be ~50GB of unrelated Docker images from other projects,
+  # not this one — but a genuinely disk-constrained dev machine is still
+  # the reality this choice is made for. Redpanda speaks the real Kafka
+  # wire protocol (same client libraries — kafkajs — same topics/
+  # partitions/consumer-group semantics everything in CLAUDE.md's Kafka
+  # sections describes), as a single ~400MB C++ binary with no separate
+  # coordination service, verified with a real `docker pull` + start +
+  # `rpk cluster health` before adopting it, not assumed.
+  #
+  # Single-node dev flags (`--overprovisioned`, `--smp=1`, `--memory=1G`):
+  # this is explicitly a local single-broker setup, not tuned for
+  # throughput — matches every other piece of local infra in this compose
+  # file (one Postgres, one Redis, one s3mock).
+  redpanda:
+    image: redpandadata/redpanda:latest
+    container_name: auctionx-redpanda
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=0
+      - --check=false
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://localhost:9092
+    ports:
+      - '9092:9092'
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ['CMD-SHELL', 'rpk cluster health | grep -E "Healthy:.+true" || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   postgres_data:
   s3mock_data:
+  redpanda_data:

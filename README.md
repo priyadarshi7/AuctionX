@@ -21,10 +21,10 @@ pre-scaffold empty structure).
 ```bash
 npm install
 cp services/api/.env.example services/api/.env
-docker compose up -d postgres redis    # local Postgres + Redis for services/api
+docker compose up -d              # Postgres, Redis, s3mock, Redpanda
 npm run --workspace=services/api prisma:migrate   # apply migrations
 npm run dev:api      # start the API in watch mode (http://localhost:4000)
-npm run test:api     # run the API test suite (needs Postgres + Redis running)
+npm run test:api     # run the API test suite (needs the full docker-compose stack running)
 npm run lint:api     # lint the API
 ```
 
@@ -54,6 +54,12 @@ npm run db:restore -- <path.sql>  # OVERWRITES current local DB contents — no 
 - Zod for env validation and request validation
 - Pino for structured JSON logging
 - Jest + Supertest for testing
+- Redpanda (Kafka-API-compatible) + the Outbox pattern for durable
+  async events (see ADR-0027)
+- WebSockets for live auction updates and notifications (see ADR-0020/0021)
 
-Kafka and WebSockets are introduced in later phases — see `PROGRESS.md` and
-`CLAUDE.md` Section 73 for the phase plan.
+This section (and the "Structure" one above) describes only the backend's
+original foundation and is known to be stale — `apps/web` (Next.js
+frontend), object storage, Orders/Payments, and Notifications have all
+since been built. See `PROGRESS.md` for the actual current state; fixing
+this file to match is tracked there, not done as part of this edit.

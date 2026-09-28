@@ -57,6 +57,13 @@ const envSchema = z.object({
   // there, with Stripe's own signing secret) — this key only ever protects
   // traffic between this process and itself.
   MOCK_PAYMENT_WEBHOOK_SECRET: z.string().min(1).default('dev-mock-payment-webhook-secret'),
+  // Redpanda locally (docker-compose.yml, ADR-0027) — Kafka-API-compatible,
+  // so this is a real Kafka broker address either way. Same reasoning as
+  // REDIS_URL/S3_ENDPOINT: the app must still boot and serve core traffic
+  // with Kafka/Redpanda unreachable (Section 40) — only the Outbox
+  // publisher and the notification consumer are affected, both of which
+  // already retry indefinitely rather than crash the process.
+  KAFKA_BROKERS: z.string().min(1).default('localhost:9092'),
 });
 
 // Parse and Check Schema

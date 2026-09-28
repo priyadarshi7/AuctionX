@@ -5,8 +5,14 @@ import { logger } from './infrastructure/observability/logger';
 import { prisma } from './infrastructure/database/prisma';
 import { redis } from './infrastructure/redis/client';
 import { startAuctionClosingWorker, stopAuctionClosingWorker } from './infrastructure/jobs/auctionClosingWorker';
+import {
+  startOutboxPublisherWorker,
+  stopOutboxPublisherWorker,
+} from './infrastructure/jobs/outboxPublisherWorker';
 import { startWebSocketGateway, stopWebSocketGateway } from './infrastructure/websocket/gateway';
 import { ensureBucketExists } from './infrastructure/storage/s3Client';
+import { connectProducer, disconnectProducer } from './infrastructure/kafka/producer';
+import { startNotificationsConsumer, stopNotificationsConsumer } from './modules/notifications/consumer';
 
 const app = createApp();
 
@@ -23,29 +29,49 @@ startWebSocketGateway(server);
 // until this resolves, which is a fraction of a second against a healthy
 // local s3mock/production R2 bucket that already exists.
 void ensureBucketExists();
+// Kafka/Redpanda wiring (ADR-0027): connecting the producer is
+// fire-and-forget for the same reason as ensureBucketExists — the app must
+// serve core traffic even if Redpanda is unreachable (Section 40).
+// startOutboxPublisherWorker/startNotificationsConsumer are started
+// unconditionally right after — the publisher's own runOnce checks
+// isProducerConnected() before every scan, and the consumer's connect()
+// retries internally (kafkajs's default retry config), so neither needs to
+// wait on connectProducer() resolving first.
+void connectProducer();
+startOutboxPublisherWorker();
+startNotificationsConsumer();
 
 // Graceful shutdown: stop accepting new connections, let in-flight requests
-// finish, close the DB pool and Redis connection, then exit. Once Kafka
-// exists, it must be closed here too, in dependency order (Section 69) — the
-// HTTP server closes first because nothing should still be trying to use
-// Prisma/Redis after that. Redis closing cleanly isn't safety-critical the
-// way Prisma's is (Section 12 — nothing here is the source of truth), but
-// leaving the connection open would leak a handle and could delay process
-// exit. WebSockets close BEFORE the HTTP server, not after: open WS
+// finish, close the DB pool and Redis connection, then exit (Section 69).
+// The HTTP server closes first because nothing should still be trying to
+// use Prisma/Redis after that. Redis closing cleanly isn't safety-critical
+// the way Prisma's is (Section 12 — nothing here is the source of truth),
+// but leaving the connection open would leak a handle and could delay
+// process exit. WebSockets close BEFORE the HTTP server, not after: open WS
 // connections aren't in-flight HTTP requests that need to finish, they're
 // long-lived, so there's no reason to wait — every client gets a clean
 // "going away" frame telling it to reconnect, rather than the connection
 // just dying when the process exits.
+//
+// Kafka pieces stop in dependency order, before the HTTP server: the
+// notifications consumer first (stop accepting new work), then the outbox
+// publisher (stop producing new work onto a soon-to-be-closed producer),
+// then the producer itself — the same "stop the thing that depends on X
+// before closing X" discipline Prisma/Redis already follow below.
 function shutdown(signal: string): void {
   logger.info({ signal }, 'Shutting down gracefully');
   stopAuctionClosingWorker();
+  stopOutboxPublisherWorker();
   stopWebSocketGateway();
+  void stopNotificationsConsumer().catch((err: unknown) => {
+    logger.error({ err }, 'Error stopping notifications consumer');
+  });
   server.close((err) => {
     if (err) {
       logger.error({ err }, 'Error during shutdown');
       process.exit(1);
     }
-    void Promise.allSettled([prisma.$disconnect(), redis.quit()])
+    void Promise.allSettled([prisma.$disconnect(), redis.quit(), disconnectProducer()])
       .then((results) => {
         for (const result of results) {
           if (result.status === 'rejected') {

@@ -34,7 +34,18 @@ Paid via the ~300ms simulated webhook, no manual refresh). **Notifications**
 (Section 1/4's long-unbuilt Notification Module, ADR-0026) is now done:
 outbid/won/sold/reserve-not-met/payment-received notifications, persisted
 in Postgres and pushed live over a new per-user WebSocket room, with a
-notification bell in the frontend nav.
+notification bell in the frontend nav. **Phase 7 — Kafka** is now done
+(ADR-0027, built after Payments/Notifications rather than before, out of
+necessity, then used as a real refactor target): Redpanda (Kafka-API-
+compatible, chosen for its much lighter local-dev footprint than real
+Kafka+Zookeeper) + the Outbox pattern + a notifications consumer, with all
+three of Notifications' triggers (bid outbid, auction closed, payment
+succeeded) moved OFF the bid/closing/payment critical path onto it,
+matching Section 64's own diagram. Idempotent consumer, dead-letter queue
+on unprocessable messages — both genuinely exercised, not just built:
+verified live when the production consumer group's first connection
+replayed a backlog of stale test data and correctly DLQ'd every
+unprocessable message instead of crashing.
 
 ## Project location
 
@@ -57,7 +68,75 @@ this session (Storage Sense / WinDirStat — a shell-based `du` scan of
 `AppData` never completed in reasonable time this session, which is itself
 a bad sign).
 
+**Resolved (2026-09-28), while clearing headroom for Phase 7's Redpanda
+image (ADR-0027)**: confirmed via `docker images` — ~50GB of unrelated
+Docker images from OTHER projects on this machine (`blender-render-*`
+one-off render jobs, `pytorch/pytorch`, `ollama/ollama`,
+`lender-base-ml`), not AuctionX. Freed with the developer's explicit
+go-ahead (`docker image prune -a` + `docker builder prune -a`, ~54GB
+reclaimed inside Docker's own accounting). The VHDX file itself
+(confirmed at `C:\Users\ASUS\AppData\Local\Docker\wsl\disk\
+docker_data.vhdx`, 66.39GB) doesn't auto-shrink when Docker's internal
+data does, so Windows' own free-space number didn't recover — the
+developer chose to defer the actual shrink (`wsl --shutdown` + admin
+`diskpart compact vdisk`, briefly stops all containers) rather than do it
+mid-session; still open whenever convenient.
+
 ## Current Task
+
+**TASK KAFKA-001 — Kafka/Outbox + move Notifications off the critical path
+(ADR-0027)** → **complete**. Redpanda added to docker-compose.yml
+(Kafka-API-compatible, ~400MB, chosen over real Kafka+Zookeeper for local-
+dev footprint — verified pullable/startable/healthy before adopting it).
+`OutboxEvent` model + `infrastructure/outbox/repository.ts`
+(`createOutboxEventInTx`, same cross-module reach-in pattern as
+`createNotificationInTx` before it) + a polling publisher worker
+(`infrastructure/jobs/outboxPublisherWorker.ts`, 2s scan). `bids/
+repository.ts`, `auctions/repository.ts`, `payments/repository.ts` no
+longer create `Notification` rows directly — each writes ONE `OutboxEvent`
+in its existing transaction instead (`bid-events`/`auction-events` keyed
+by auctionId, `payment-events` keyed by orderId). `modules/notifications/
+consumer.ts` is the new sole creator of `Notification` rows, idempotent via
+`sourceEventId` = Kafka's own `(topic, partition, offset)` — no producer-
+side id-generation chicken-and-egg problem — enforced by a new
+`@@unique([sourceEventId, userId])` constraint (compound, since one
+`auction.sold` event legitimately produces two notifications, one per
+side). `infrastructure/kafka/consumer.ts`'s generic runner sends any
+handler failure to a `{topic}-dlq` topic rather than blocking the
+partition or crashing (Section 43) — genuinely exercised, not just built:
+the production consumer group's first-ever connection replayed a backlog
+of stale test-session messages referencing deleted users, and every one
+correctly DLQ'd instead of crashing anything.
+
+A real, non-empty-table migration this time: 3 pre-existing Notification
+rows (real usage — see below) required a backfill-then-tighten migration
+(`sourceEventId` added nullable, backfilled to each row's own `id`, then
+set NOT NULL), hand-written after `prisma migrate diff` needed a genuinely
+disposable shadow database — created a temporary `auctionx_shadow_tmp`
+database on the same Postgres server this time (not the real one, learning
+directly applied from ADR-0024's incident) and dropped it immediately
+after.
+
+**Discovered mid-task, not AuctionX's fault, real accounts**: two
+non-test-prefixed users existed in the database
+(`priyadarshisatyakam77@gmail.com`, `tripathialisha03@gmail.com`) — the
+developer's own real usage of the live app, generating 3 real Notification
+rows. Confirmed and preserved throughout (the migration backfill above,
+every cleanup query this task ran) — never touched, unlike the routinely-
+deleted `test-*@example.com` rows.
+
+165/165 tests passing (162 prior + 3 new: consumer idempotency on Kafka
+redelivery, both the single- and two-notification-from-one-event cases,
+plus the malformed-payload-throws DLQ-routing signal).
+`notifications.test.ts` was rewritten to poll for results instead of
+asserting immediately, since notification creation is now genuinely
+asynchronous. Verified live twice: full automated suite against a real
+Redpanda (not mocked), and a full real-browser Playwright session
+(register → bid → outbid via curl → notification bell updates live with
+no page reload) — proving ADR-0026's user-visible behavior is unchanged
+despite the underlying delivery mechanism changing completely.
+
+---
 
 **TASK NOTIF-001 — Notifications (ADR-0026)** → **complete**. Section 1/4's
 Notification Module, unbuilt until now: five triggers (`OUTBID`,
@@ -1782,6 +1861,7 @@ whenever the developer wants any of them.
 - `docs/architecture/adr/0024-database-backup-incident.md`
 - `docs/architecture/adr/0025-payment-domain-and-mock-provider.md`
 - `docs/architecture/adr/0026-notifications.md`
+- `docs/architecture/adr/0027-kafka-outbox-notifications.md`
 
 ## Known accepted issues
 
@@ -1905,8 +1985,17 @@ whenever the developer wants any of them.
 - **Cache-invalidation coverage is manual, not structural** (ADR-0017) — any
   future new way to mutate an `Auction` row must remember to call
   `invalidateAuctionCache`; nothing enforces this today beyond code review.
-- Outbox event on bid acceptance (Section 10's full pipeline) — Phase 7
-  territory; nothing exists yet to consume such an event (ADR-0011/0012).
+- **README.md is stale** — still describes the backend-only foundation
+  (its "Structure"/"Stack" sections predate `apps/web`, object storage,
+  Orders/Payments, and Notifications). Flagged inline in the file itself
+  rather than silently left wrong; a full rewrite is a separate task, not
+  bundled into whatever feature happens to touch it next.
+- Retention/cleanup for `OutboxEvent` rows and Redpanda topic data
+  (ADR-0027) — neither exists yet; revisit once growth is an actually
+  measured problem at this project's scale, not a theoretical one.
+- Extracting Kafka consumers into a separate process from the API
+  (ADR-0027) — no scaling/failure-boundary reason exists yet at
+  one-instance scale (Section 4).
 - Auction `end` and the closing worker (Section 17) — needs winner
   determination, which needs the Bid module (Phase 4). An `ACTIVE`/`PAUSED`
   auction whose `endTime` passes today just sits there with no automatic

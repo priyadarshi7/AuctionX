@@ -378,12 +378,77 @@ model Notification {
   // normalize it further.
   data      Json
 
+  // The OutboxEvent.id this notification was created from (ADR-0027) — NOT
+  // a Prisma relation/FK (OutboxEvent rows are routinely deleted/archived
+  // once published, see the retention note there; a notification must
+  // survive that). This is what makes the Kafka consumer's Notification
+  // creation idempotent: a redelivered message (Kafka is at-least-once,
+  // Section 15) re-derives the SAME sourceEventId, and the compound unique
+  // below turns a duplicate insert into a P2002 the consumer catches and
+  // treats as a safe no-op — the same pattern bids/service.ts and
+  // payments/service.ts already use for their own idempotency races.
+  //
+  // Scoped to (sourceEventId, userId), not a bare unique on sourceEventId
+  // alone — a single event (e.g. "auction.sold") legitimately produces TWO
+  // notifications, one per side (AUCTION_WON for the buyer, AUCTION_SOLD
+  // for the seller); the pair must both be allowed to exist, while a
+  // redelivery of that same event must not duplicate either one.
+  sourceEventId String
+
   readAt DateTime?
 
   createdAt DateTime @default(now())
 
   // Matches "give me this user's notifications, newest first" — the only
   // query pattern this table serves.
+  @@unique([sourceEventId, userId])
   @@index([userId, createdAt])
   @@map("notifications")
+}
+
+// The Outbox pattern (Section 16, ADR-0027): a durable, transactionally-
+// consistent record of "this event happened," written in the SAME
+// transaction as the domain change it describes (a bid being outbid, an
+// auction closing, a payment succeeding) — never published to Kafka
+// directly from request-handling code, which is exactly what Section 10/16
+// warn against ("never publish a Kafka event and then assume the database
+// transaction will succeed" — here it's the reverse risk: publish, then
+// have the SURROUNDING transaction roll back, leaving an event for
+// something that never actually happened).
+//
+// A separate polling worker (infrastructure/jobs/outboxPublisherWorker.ts)
+// reads unpublished rows and publishes them to Kafka; a row is retried
+// indefinitely (Section 40 — "Kafka fails, business transactions continue,
+// Outbox preserves events") until it succeeds — there is no permanent
+// "FAILED" state at this layer, because a Kafka publish failure is always
+// transient/retryable, unlike a Payment, which can genuinely fail for
+// good.
+//
+// No retention/cleanup job exists yet for old PUBLISHED rows — deferred
+// (YAGNI) until table growth is an actually measured problem, not a
+// theoretical one, at this project's current scale.
+model OutboxEvent {
+  id      String @id @default(uuid())
+  // Kafka topic this event publishes to (e.g. "bid-events"). A plain
+  // string, not an enum — new topics are expected to be added over time,
+  // and a schema migration for each one would be friction with no benefit
+  // (nothing here needs the database itself to constrain topic names).
+  topic   String
+  // The Kafka partition key — auctionId for bid/auction events, orderId
+  // for payment events (Section 15: partition key exists specifically so
+  // events that must stay ORDERED relative to each other land on the same
+  // partition; payment events order per-order, not per-auction, so this
+  // deliberately does NOT follow Section 15's literal auction_id example
+  // for every topic).
+  key     String
+  payload Json
+
+  createdAt   DateTime  @default(now())
+  publishedAt DateTime?
+
+  // The exact query the publisher worker runs: oldest unpublished events
+  // first, so a long Kafka/Redpanda outage doesn't reorder delivery once
+  // it recovers.
+  @@index([publishedAt, createdAt])
+  @@map("outbox_events")
 }

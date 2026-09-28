@@ -1,7 +1,6 @@
 import type { Bid } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { notifyAuctionChanged } from '../../infrastructure/realtime/auctionEvents';
-import { pushNotification } from '../../infrastructure/realtime/notificationEvents';
 import { logger } from '../../infrastructure/observability/logger';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../middleware/errors';
 import { getAuctionForViewer, type RequestingUser } from '../auctions/service';
@@ -74,7 +73,7 @@ export async function placeBid(
   // logic never re-sends the outbid notification either.
   const existing = await findBidByIdempotencyKey(bidderId, input.idempotencyKey);
   if (existing) {
-    return { bid: existing, extended: false, outbidNotification: undefined };
+    return { bid: existing, extended: false };
   }
 
   try {
@@ -90,14 +89,12 @@ export async function placeBid(
     // mutation" signal worth threading back out here just to skip a cheap
     // no-op) — a subscribed watcher just refetches and gets identical data.
     await notifyAuctionChanged(auctionId, 'bid');
-    // Pushed only after the transaction that created it has committed
-    // (Section 39/notification model comment) — the Notification row
-    // itself, created inside placeBidTransactionally, is already durable
-    // by this point regardless of whether anyone is connected to receive
-    // this push.
-    if (result.outbidNotification) {
-      pushNotification(result.outbidNotification);
-    }
+    // An outbid event (if this bid outbid someone) was already published
+    // to the Outbox inside placeBidTransactionally's transaction —
+    // nothing further to do here. A consumer (modules/notifications/
+    // consumer.ts) picks it up via Kafka and creates/pushes the
+    // Notification asynchronously (ADR-0027) — deliberately off this
+    // request's critical path (Section 64).
     return result;
   } catch (err) {
     // Two concurrent requests with the SAME (bidderId, idempotencyKey)
@@ -119,7 +116,7 @@ export async function placeBid(
           { bidderId, auctionId },
           'bid.idempotent_replay_after_cross_auction_key_reuse_race',
         );
-        return { bid, extended: false, outbidNotification: undefined };
+        return { bid, extended: false };
       }
     }
     throw err;

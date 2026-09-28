@@ -1,7 +1,6 @@
 import type { Payment, PaymentStatus } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma';
-import { createNotificationInTx } from '../notifications/repository';
-import { pushNotification } from '../../infrastructure/realtime/notificationEvents';
+import { createOutboxEventInTx } from '../../infrastructure/outbox/repository';
 
 // PENDING or SUCCEEDED both count as "active" — if either exists, don't
 // start a second payment attempt for this order (PENDING: one's already in
@@ -50,7 +49,7 @@ export async function applyPaymentWebhookEvent(
   providerRef: string,
   outcome: 'SUCCEEDED' | 'FAILED',
 ): Promise<ApplyWebhookResult> {
-  const result = await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     const rows = await tx.$queryRaw<LockedPaymentRow[]>`
       SELECT id, "orderId", status
       FROM payments
@@ -59,33 +58,34 @@ export async function applyPaymentWebhookEvent(
     `;
     const payment = rows[0];
     if (!payment || payment.status !== 'PENDING') {
-      return { applied: false, notification: undefined };
+      return { applied: false };
     }
 
     await tx.payment.update({ where: { id: payment.id }, data: { status: outcome } });
 
-    let notification;
     if (outcome === 'SUCCEEDED') {
       // .update() already returns the full updated row — no extra read
-      // needed to get sellerId/amountCents for the notification below.
+      // needed to get sellerId/amountCents for the event payload below.
       const updatedOrder = await tx.order.update({ where: { id: payment.orderId }, data: { status: 'PAID' } });
-      notification = await createNotificationInTx(tx, {
-        userId: updatedOrder.sellerId,
-        type: 'PAYMENT_RECEIVED',
-        auctionId: updatedOrder.auctionId,
-        orderId: updatedOrder.id,
-        data: { amountCents: updatedOrder.amountCents },
+      // Published via the Outbox (ADR-0027) — a consumer
+      // (modules/notifications/consumer.ts) turns this into a
+      // PAYMENT_RECEIVED notification for the seller, asynchronously.
+      // Keyed by orderId, not auctionId (unlike the other two topics) —
+      // ordering matters per-order here, not per-auction (schema.prisma's
+      // OutboxEvent doc comment).
+      await createOutboxEventInTx(tx, {
+        topic: 'payment-events',
+        key: updatedOrder.id,
+        payload: {
+          type: 'payment.succeeded',
+          orderId: updatedOrder.id,
+          auctionId: updatedOrder.auctionId,
+          sellerId: updatedOrder.sellerId,
+          amountCents: updatedOrder.amountCents,
+        },
       });
     }
 
-    return { applied: true, notification };
+    return { applied: true };
   });
-
-  // Pushed only after commit — same reasoning as the other two trigger
-  // sites (bids/repository.ts, auctions/repository.ts).
-  if (result.notification) {
-    pushNotification(result.notification);
-  }
-
-  return { applied: result.applied };
 }
