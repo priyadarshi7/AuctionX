@@ -3,9 +3,11 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ApiError } from '@/lib/apiClient';
 import { listAuctionsRequest } from '@/lib/auctions';
 import { CATEGORY_DISPLAY, CATEGORY_ORDER, THEME_CLASSES } from '@/lib/categoryDisplay';
-import type { Auction, AuctionCategory, AuctionStatus } from '@/lib/types/auction';
+import { searchAuctionsRequest, type SearchAuctionResult } from '@/lib/search';
+import type { AuctionCategory, AuctionStatus } from '@/lib/types/auction';
 import { AuctionCard } from '../components/AuctionCard';
 import { AuctionCardSkeleton } from '../components/AuctionCardSkeleton';
 import { Button, ButtonLink } from '../components/ui/Button';
@@ -43,15 +45,21 @@ function parseSort(value: string | null): SortId {
   return SORT_OPTIONS.some((s) => s.id === value) ? (value as SortId) : 'newest';
 }
 
-// Sorting is done client-side over the pages loaded so far: the API pages
-// newest-first by keyset cursor (ADR-0008) and has no sort or search
-// parameter yet. The UI says so whenever more pages remain.
-function sortAuctions(auctions: Auction[], sort: SortId): Auction[] {
+// Sorting is done client-side over the pages loaded so far — true for both
+// the browse path (cursor pagination, ADR-0008) and the search path (page
+// pagination, ADR-0029): neither backend endpoint takes a sort parameter,
+// so "ending soonest"/"price" sort the results fetched so far, while
+// "newest" for browse and relevance for search are already correct
+// server-side order. The UI says so whenever more pages remain.
+function sortAuctions<T extends { currentPriceCents: number; endTime: string | null }>(
+  auctions: T[],
+  sort: SortId,
+): T[] {
   if (sort === 'newest') return auctions;
   const copy = [...auctions];
   if (sort === 'price-asc') return copy.sort((a, b) => a.currentPriceCents - b.currentPriceCents);
   if (sort === 'price-desc') return copy.sort((a, b) => b.currentPriceCents - a.currentPriceCents);
-  const end = (a: Auction) => (a.endTime ? new Date(a.endTime).getTime() : Number.POSITIVE_INFINITY);
+  const end = (a: T) => (a.endTime ? new Date(a.endTime).getTime() : Number.POSITIVE_INFINITY);
   return copy.sort((a, b) => end(a) - end(b));
 }
 
@@ -88,18 +96,59 @@ export function BrowseView() {
   }, [query, urlQuery, setParams]);
 
   const statusApi = STATUS_OPTIONS.find((s) => s.id === statusId)!.api;
+  const hasQuery = urlQuery.trim() !== '';
+  const SEARCH_PAGE_SIZE = 20;
 
   // Maps directly onto the backend's keyset pagination (ADR-0008): each
   // page's nextCursor becomes the next page's cursor param. No offset math
   // anywhere — the same correctness reason applies to a live "newest first"
-  // feed on the frontend as it did on the backend.
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError, refetch } = useInfiniteQuery({
+  // feed on the frontend as it did on the backend. Only active with no text
+  // query — `enabled: !hasQuery` rather than tearing this query down, so
+  // clearing the search box resumes right where browsing left off instead
+  // of re-fetching from scratch.
+  const browseQuery = useInfiniteQuery({
     queryKey: ['auctions', 'list', 'browse', category, statusId],
     queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
       listAuctionsRequest({ category: category || undefined, status: statusApi, cursor: pageParam }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    enabled: !hasQuery,
   });
+
+  // The real thing (ADR-0029) — relevance-ranked full-text search against
+  // OpenSearch, covering the WHOLE dataset, not just whatever's been
+  // paginated in so far. Page-based (`from`/`size`), not cursor-based: a
+  // genuinely separate, simpler read path from browse, matching the
+  // backend's own pagination choice for this endpoint. `total` (which the
+  // browse endpoint never returns) drives `hasNextPage` exactly, instead of
+  // the "fetch one extra row" heuristic keyset pagination uses.
+  const searchQuery = useInfiniteQuery({
+    queryKey: ['auctions', 'search', urlQuery, category, statusId],
+    queryFn: ({ pageParam }: { pageParam: number }) =>
+      searchAuctionsRequest({
+        q: urlQuery,
+        category: category || undefined,
+        status: statusApi,
+        page: pageParam,
+        limit: SEARCH_PAGE_SIZE,
+      }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) => {
+      const loadedSoFar = allPages.reduce((sum, page) => sum + page.results.length, 0);
+      return loadedSoFar < lastPage.total ? allPages.length + 1 : undefined;
+    },
+    enabled: hasQuery,
+  });
+
+  const active = hasQuery ? searchQuery : browseQuery;
+  const { fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, isError, error, refetch } = active;
+  const searchUnavailable = hasQuery && error instanceof ApiError && error.code === 'SEARCH_UNAVAILABLE';
+
+  const loaded: SearchAuctionResult[] = useMemo(() => {
+    if (hasQuery) return searchQuery.data?.pages.flatMap((page) => page.results) ?? [];
+    return browseQuery.data?.pages.flatMap((page) => page.auctions) ?? [];
+  }, [hasQuery, searchQuery.data, browseQuery.data]);
+  const searchTotal = hasQuery ? searchQuery.data?.pages[0]?.total : undefined;
 
   // Auto-load the next page as the sentinel nears the viewport; the
   // "Load more" button below stays as the keyboard / no-observer fallback.
@@ -117,20 +166,20 @@ export function BrowseView() {
     return () => observer.disconnect();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  const loaded = useMemo(() => data?.pages.flatMap((page) => page.auctions) ?? [], [data]);
-
-  const visible = useMemo(() => {
-    const needle = urlQuery.trim().toLowerCase();
-    const filtered = needle ? loaded.filter((a) => a.title.toLowerCase().includes(needle)) : loaded;
-    return sortAuctions(filtered, sort);
-  }, [loaded, urlQuery, sort]);
+  // No client-side substring filtering anymore — `loaded` already IS the
+  // right set (relevance-matched by the real backend when hasQuery, or
+  // every browsed row otherwise). Sort is still applied client-side, since
+  // neither backend endpoint takes a sort parameter.
+  const visible = useMemo(() => sortAuctions(loaded, sort), [loaded, sort]);
 
   const filtersActive = category !== '' || statusId !== 'all' || urlQuery !== '' || sort !== 'newest';
   const clearAll = () => {
     setQuery('');
     router.replace(pathname, { scroll: false });
   };
-  const localOnly = (urlQuery !== '' || sort !== 'newest') && hasNextPage;
+  // Only SORT still has a "loaded so far" caveat — search itself now
+  // covers the whole dataset (searchTotal), not just what's paginated in.
+  const localOnly = sort !== 'newest' && hasNextPage;
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-10">
@@ -144,7 +193,7 @@ export function BrowseView() {
         <div className="flex flex-col gap-3 md:flex-row md:items-center">
           <div className="relative flex-1">
             <label htmlFor="browse-search" className="sr-only">
-              Search auctions by title
+              Search auctions by title or description
             </label>
             <span aria-hidden className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink/60">
               &#9906;
@@ -154,7 +203,7 @@ export function BrowseView() {
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search by title"
+              placeholder="Search auctions — try a keyword from the title or description"
               autoComplete="off"
               className={`${inputClass(false)} pl-9`}
             />
@@ -236,10 +285,18 @@ export function BrowseView() {
         <p className="text-ink/70">
           {isLoading
             ? 'Loading auctions…'
-            : `${visible.length}${hasNextPage ? '+' : ''} ${visible.length === 1 ? 'auction' : 'auctions'}${
-                category ? ` in ${CATEGORY_DISPLAY[category].label}` : ''
-              }`}
-          {localOnly && ' · search and sort apply to the auctions loaded so far'}
+            : (() => {
+                // searchTotal is the real, whole-dataset count (ADR-0029) —
+                // shown exactly when known, instead of the "+" heuristic
+                // browse pagination has to fall back to (it only ever knows
+                // "at least this many," via the one-extra-row keyset trick).
+                const count = searchTotal ?? visible.length;
+                const approximate = searchTotal === undefined && hasNextPage;
+                return `${count}${approximate ? '+' : ''} ${count === 1 ? 'auction' : 'auctions'}${
+                  hasQuery ? ` for "${urlQuery}"` : category ? ` in ${CATEGORY_DISPLAY[category].label}` : ''
+                }`;
+              })()}
+          {localOnly && ' · sort applies to the auctions loaded so far'}
         </p>
         {filtersActive && (
           <button type="button" onClick={clearAll} className="font-semibold underline underline-offset-4">
@@ -258,12 +315,23 @@ export function BrowseView() {
 
       {isError && (
         <PageMessage
-          title="Couldn't load auctions"
-          body="Check your connection and try again."
+          title={searchUnavailable ? 'Search is temporarily unavailable' : "Couldn't load auctions"}
+          body={
+            searchUnavailable
+              ? 'The search index is down, but the rest of the site is fine — browse by category instead, or try again shortly.'
+              : 'Check your connection and try again.'
+          }
           action={
-            <Button variant="secondary" size="sm" onClick={() => void refetch()}>
-              Try again
-            </Button>
+            <div className="flex gap-3">
+              <Button variant="secondary" size="sm" onClick={() => void refetch()}>
+                Try again
+              </Button>
+              {searchUnavailable && (
+                <Button size="sm" onClick={clearAll}>
+                  Browse instead
+                </Button>
+              )}
+            </div>
           }
         />
       )}
@@ -274,9 +342,11 @@ export function BrowseView() {
           title={filtersActive ? 'Nothing matches those filters' : 'No auctions yet'}
           body={
             filtersActive
-              ? hasNextPage
-                ? 'Nothing in the auctions loaded so far. Load more, or loosen a filter.'
-                : 'Try a different category or status, or clear your search.'
+              ? hasQuery
+                ? 'No auctions match that search. Try a different keyword, or loosen a filter.'
+                : hasNextPage
+                  ? 'Nothing in the auctions loaded so far. Load more, or loosen a filter.'
+                  : 'Try a different category or status, or clear your search.'
               : 'Be the first to list something.'
           }
           action={

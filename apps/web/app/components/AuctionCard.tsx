@@ -7,10 +7,13 @@ import type { Auction } from '@/lib/types/auction';
 import { useTimeRemaining } from '@/lib/useTimeRemaining';
 import { Mascot } from './Mascot';
 
-// Shared between the home page's trending grid and the /auctions browse
-// grid so both surfaces render auctions identically — one card, two call
-// sites, not two near-duplicate implementations.
-export function AuctionCard({ auction }: { auction: Auction }) {
+// Only the fields this card actually renders — not the full Auction type —
+// so the SAME component can render either a real Auction (browse/home) or a
+// SearchAuctionResult (lib/search.ts's narrower OpenSearch-backed shape,
+// ADR-0029), without an adapter fabricating fields neither source has.
+type AuctionCardData = Pick<Auction, 'id' | 'title' | 'category' | 'status' | 'images' | 'currentPriceCents' | 'endTime'>;
+
+export function AuctionCard({ auction }: { auction: AuctionCardData }) {
   const display = CATEGORY_DISPLAY[auction.category];
   const timeRemaining = useTimeRemaining(auction.status === 'ACTIVE' ? auction.endTime : null);
 
