@@ -3,6 +3,7 @@ import { findAuctionById } from '../auctions/repository';
 import { logger } from '../../infrastructure/observability/logger';
 import { env } from '../../config/env';
 import { createConsumer, runConsumer, type MessageId } from '../../infrastructure/kafka/consumer';
+import { SEARCH_EVENTS_TOPIC } from '../../infrastructure/kafka/topics';
 import { deleteAuctionDocument, upsertAuctionDocument } from './repository';
 
 // A distinct group id in tests, same reasoning as modules/notifications/
@@ -21,8 +22,13 @@ const GROUP_ID = env.NODE_ENV === 'test' ? 'search-consumer-test' : 'search-cons
 // auction-events-dlq, corrupting a signal that's supposed to mean "this
 // specific message is actually malformed," not "a message meant for a
 // different consumer." A dedicated topic keeps both consumers' "poison
-// message" signal meaningful.
-const TOPICS = ['search-events'];
+// message" signal meaningful. Test-scoped (ADR-0031) for a SECOND reason
+// on top of that: a live dev server's consumer, in its OWN group, still
+// independently receives a full copy of every message on a topic a test
+// run publishes to (consumer-group isolation alone doesn't prevent that)
+// — this is what actually stops a live dev server from polluting the real
+// OpenSearch index with test data, not just GROUP_ID above.
+const TOPICS = [SEARCH_EVENTS_TOPIC];
 
 type AuctionReindexPayload = { type: 'auction.reindex'; auctionId: string };
 

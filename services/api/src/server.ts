@@ -15,6 +15,7 @@ import { connectProducer, disconnectProducer } from './infrastructure/kafka/prod
 import { startNotificationsConsumer, stopNotificationsConsumer } from './modules/notifications/consumer';
 import { startSearchConsumer, stopSearchConsumer } from './modules/search/consumer';
 import { ensureAuctionIndex } from './modules/search/repository';
+import { reindexAllAuctions } from './modules/search/service';
 
 const app = createApp();
 
@@ -45,10 +46,19 @@ startNotificationsConsumer();
 // Search (Phase 9, ADR-0029): same fire-and-forget/no-throw treatment as
 // ensureBucketExists — the index bootstrap must never block boot, and
 // startSearchConsumer's own connect() retries internally exactly like
-// startNotificationsConsumer's does.
-void ensureAuctionIndex().catch((err: unknown) => {
-  logger.error({ err }, 'Failed to ensure OpenSearch auction index exists');
-});
+// startNotificationsConsumer's does. When ensureAuctionIndex just CREATED
+// the index (vs. found it already existing), a one-time full backfill
+// runs right after — otherwise a fresh index (or a real, pre-existing
+// auction nothing has mutated since search shipped, ADR-0031) has no
+// reindex event to ever populate it from.
+void ensureAuctionIndex()
+  .then(({ created }) => {
+    if (created) return reindexAllAuctions();
+    return undefined;
+  })
+  .catch((err: unknown) => {
+    logger.error({ err }, 'Failed to ensure OpenSearch auction index exists / backfill');
+  });
 startSearchConsumer();
 
 // Graceful shutdown: stop accepting new connections, let in-flight requests

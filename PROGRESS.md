@@ -93,6 +93,64 @@ mid-session; still open whenever convenient.
 
 ## Current Task
 
+**TASK SEARCH-003 — Three real bugs reported directly from live usage, all
+fixed (ADR-0031)** → **complete, not committed yet**. (1) The search box
+required a complete word — "Pi" didn't find "Pikachu Card," because
+`multi_match` only matches whole tokens. Fixed: `type: 'bool_prefix'`
+(matches the last typed term as a prefix — the right query shape for a
+box that reacts as you type). (2) The real OpenSearch index had
+accumulated 107 stale "Test Lot"-titled documents from this session's own
+`npx jest` runs — test cleanup deletes Postgres rows but never tells the
+index to remove the matching document, and it turned out giving the
+INDEX a `-test` suffix (mirroring the existing consumer-group pattern)
+wasn't enough on its own: a live dev server's consumer, in a DIFFERENT
+consumer group, still independently received every message a test run
+published on the shared `search-events` TOPIC. Real fix needed a second
+layer: a new `infrastructure/kafka/topics.ts` makes the TOPIC itself
+`NODE_ENV`-conditional too (`search-events-test`), used by both publish
+sites and the consumer's subscription. Verified by running the full
+165-test suite with the live dev server up (the exact condition that
+caused the leak) and confirming via direct index count that zero test
+documents landed in the real index. The 107 (then 8, then 1) stale
+documents already there were reconciled by diffing against real Postgres
+ids and bulk-deleting the orphans. (3) A real, pre-existing "Hello"
+auction was never indexed at all — confirmed `found: false` directly
+against OpenSearch, not a query bug. Root cause: reindex only ever fires
+ON A MUTATION (ADR-0029); a row nothing has touched since Phase 9 shipped
+never got one. Fixed with `modules/search/service.ts`'s new
+`reindexAllAuctions()` (paginated over every non-DRAFT auction, same
+cursor pattern as browsing), run automatically — once — whenever
+`server.ts` finds it just created a fresh index, plus available by hand
+via `npm run reindex:search` for a future mapping change. Verified the
+automatic path end to end: deleted the real index, restarted the server,
+watched `search.index_created` immediately followed by
+`search.reindex_all_complete: indexed: 2` in its own boot log, then
+confirmed both real auctions searchable with no manual step.
+
+**TASK SEARCH-002 — Wire the frontend's search box to the real backend
+(ADR-0029)** → **complete, not committed yet**. `apps/web/app/auctions/
+BrowseView.tsx` already had a search input and a `q` URL param from the
+earlier frontend redesign — but its comment admitted the truth at the
+time: "the API ... has no search parameter yet," so it was a client-side
+substring filter over whatever pages had already been paginated in, not a
+real search. Now: `hasQuery` picks between two `useInfiniteQuery`
+instances (`enabled: !hasQuery` / `enabled: hasQuery`) — the existing
+cursor-paginated browse query untouched, and a new page-paginated one
+hitting `GET /api/v1/search/auctions` (`lib/search.ts`) when there's a
+real query, covering the WHOLE dataset via the endpoint's own `total`
+rather than "loaded so far." `AuctionCard`'s prop type narrowed from the
+full `Auction` type to a `Pick` of only the fields it actually renders, so
+the same component renders both a real `Auction` and the narrower
+`SearchAuctionResult` shape without an adapter. A `SEARCH_UNAVAILABLE`
+(503) response gets its own message + a "Browse instead" fallback, not
+just the generic error state.
+
+Verified live: created a real ACTIVE auction via the API, then drove the
+actual browse page in a real Playwright browser — typed into the real
+search input, confirmed a title-word match, a description-only-word match
+("first edition" found a card whose word appears only in its description),
+and that clearing the box reverts cleanly to normal browsing.
+
 **TASK SEARCH-001 — OpenSearch-backed auction search (Phase 9, ADR-0029)**
 → **complete, not committed yet**. See ADR-0029 for full design/tradeoffs.
 Summary: `docker-compose.yml` gained an `opensearch` service (verified
@@ -1960,6 +2018,7 @@ whenever the developer wants any of them.
 - `docs/architecture/adr/0028-redis-port-6379-collision.md`
 - `docs/architecture/adr/0029-opensearch-auction-search.md`
 - `docs/architecture/adr/0030-outbox-publisher-claim-lease.md`
+- `docs/architecture/adr/0031-search-bugs-partial-match-and-test-pollution.md`
 
 ## Known accepted issues
 
@@ -2119,7 +2178,5 @@ whenever the developer wants any of them.
   Kafka/WebSockets exist to close too (Prisma + Redis both handled now).
 - Sliding-window rate limiting — only if fixed window's boundary-burst gap
   shows up as an actually exploited issue (ADR-0005).
-- Frontend search bar — `apps/web`'s NavBar never got one; the backend
-  (SEARCH-001/ADR-0029) didn't exist until now. Natural next step.
 - CI (GitHub Actions) — deferred to Phase 15 per the phase plan, though a
   minimal lint+test workflow could reasonably move earlier if requested.

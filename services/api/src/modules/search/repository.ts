@@ -3,7 +3,17 @@ import { searchClient } from '../../infrastructure/search/client';
 import { env } from '../../config/env';
 import { logger } from '../../infrastructure/observability/logger';
 
-const INDEX = env.OPENSEARCH_AUCTIONS_INDEX;
+// A distinct index in tests, same isolation principle already used for
+// Kafka consumer groups (modules/notifications/consumer.ts,
+// modules/search/consumer.ts's own GROUP_ID) — without this, every Jest
+// test-suite run indexes its own throwaway auctions ("Notifications Test
+// Lot," etc.) into the SAME index the real dev server and its real
+// browser traffic query, and nothing ever removes them when the test's
+// Postgres rows are cleaned up afterward (there's no "row no longer
+// exists in Postgres" signal, only reindex-on-mutation). Found the hard
+// way: 107 stale test documents had accumulated in the real index from
+// this session's own test runs before this fix.
+const INDEX = env.NODE_ENV === 'test' ? `${env.OPENSEARCH_AUCTIONS_INDEX}-test` : env.OPENSEARCH_AUCTIONS_INDEX;
 
 // `text` fields (title/description) get OpenSearch's default analyzer —
 // tokenized, lowercased, so "Vintage Rolex" matches a query for "rolex" —
@@ -31,17 +41,26 @@ const AUCTION_INDEX_MAPPING = {
 // Idempotent, same precedent as MEDIA-001's ensureBucketExists — safe to
 // call on every boot. Creating an index that already exists is a normal,
 // expected no-op here (checked first, not just caught-and-ignored), not an
-// error path.
-export async function ensureAuctionIndex(): Promise<void> {
+// error path. Returns whether it actually created the index — server.ts
+// uses that to trigger a one-time full backfill (service.ts's
+// reindexAllAuctions) right after, closing ADR-0031's gap for a fresh
+// index automatically. Deliberately NOT calling reindexAllAuctions from
+// here: it lives in service.ts, which imports FROM this file
+// (queryAuctions, upsertAuctionDocument) — calling back into it here would
+// be a circular import for no real benefit, when server.ts already
+// composes exactly this kind of "do A, then B" startup sequencing for
+// every other piece of infrastructure.
+export async function ensureAuctionIndex(): Promise<{ created: boolean }> {
   const exists = await searchClient.indices.exists({ index: INDEX });
   if (exists.body) {
-    return;
+    return { created: false };
   }
   await searchClient.indices.create({
     index: INDEX,
     body: { mappings: AUCTION_INDEX_MAPPING },
   });
   logger.info({ index: INDEX }, 'search.index_created');
+  return { created: true };
 }
 
 export type AuctionDocument = Pick<
@@ -134,7 +153,15 @@ export async function queryAuctions(params: SearchAuctionsParams): Promise<Searc
     });
   }
 
-  const must = params.q ? [{ multi_match: { query: params.q, fields: ['title^2', 'description'] } }] : [];
+  // `bool_prefix`, not plain `multi_match` — a search BOX needs to react
+  // to a partial word as it's typed ("pi" should already find "Pikachu"),
+  // not just complete-token matches. Plain multi_match tokenizes "pi" to
+  // the token "pi" and only matches a document containing that EXACT
+  // token — confirmed directly against OpenSearch that it returns zero
+  // results for "Pi" against a "Pikachu Card" document. `bool_prefix`
+  // treats every term except the last as a normal term match and the last
+  // term as a prefix match, which is exactly "search as you type."
+  const must = params.q ? [{ multi_match: { query: params.q, type: 'bool_prefix' as const, fields: ['title^2', 'description'] } }] : [];
 
   const response = await searchClient.search({
     index: INDEX,

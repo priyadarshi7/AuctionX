@@ -14,7 +14,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "db:backup": "tsx scripts/db-backup.ts",
-    "db:restore": "tsx scripts/db-restore.ts"
+    "db:restore": "tsx scripts/db-restore.ts",
+    "reindex:search": "tsx scripts/reindex-search.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1141.0",

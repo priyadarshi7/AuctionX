@@ -1,19 +1,21 @@
 import type { Auction, AuctionCategory, AuctionCondition, AuctionStatus, Prisma } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma';
 import { createOutboxEventInTx } from '../../infrastructure/outbox/repository';
+import { SEARCH_EVENTS_TOPIC } from '../../infrastructure/kafka/topics';
 
 // Phase 9 (Section 25/ADR-0029): every function in this file that changes
 // a field the search index cares about publishes this SAME lightweight
 // signal, in the SAME transaction as the write — the point isn't to carry
 // data in the event (it carries only the id), it's to tell
 // modules/search/consumer.ts "go re-read this auction and reindex it,"
-// which it does from Postgres directly. A dedicated 'search-events' topic,
-// not 'auction-events' — see that consumer's own comment for why sharing
-// a topic with modules/notifications/consumer.ts would corrupt ITS DLQ
-// signal.
+// which it does from Postgres directly. A dedicated topic, not
+// 'auction-events' — see that consumer's own comment for why sharing a
+// topic with modules/notifications/consumer.ts would corrupt ITS DLQ
+// signal. Test-scoped (SEARCH_EVENTS_TOPIC) so a live dev server can't
+// pick up test-published events (ADR-0031).
 function publishReindexEvent(tx: Prisma.TransactionClient, auctionId: string): Promise<unknown> {
   return createOutboxEventInTx(tx, {
-    topic: 'search-events',
+    topic: SEARCH_EVENTS_TOPIC,
     key: auctionId,
     payload: { type: 'auction.reindex', auctionId },
   });
