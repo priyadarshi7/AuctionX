@@ -2,74 +2,131 @@
 
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { useState } from 'react';
 import { listMyOrdersRequest } from '@/lib/orders';
 import { formatCents } from '@/lib/format';
-import { useAuthStore } from '@/store/authStore';
+import { useRequireAuth } from '@/lib/useRequireAuth';
+import { ButtonLink } from '../components/ui/Button';
+import { PageHeader, PageLoading, PageMessage, Skeleton } from '../components/ui/Page';
+import { OrderStatusPill } from '../components/ui/StatusPill';
 
-const STATUS_LABEL: Record<string, string> = {
-  PENDING_PAYMENT: 'Awaiting payment',
-  PAID: 'Paid',
-  CANCELLED: 'Cancelled',
-};
+type Filter = 'ALL' | 'BUYING' | 'SELLING';
 
 export default function OrdersPage() {
-  const router = useRouter();
-  const status = useAuthStore((state) => state.status);
-  const user = useAuthStore((state) => state.user);
-  const accessToken = useAuthStore((state) => state.accessToken);
-
-  useEffect(() => {
-    if (status === 'anonymous') {
-      router.replace('/login');
-    }
-  }, [status, router]);
+  const auth = useRequireAuth();
+  const [filter, setFilter] = useState<Filter>('ALL');
 
   const ordersQuery = useQuery({
     queryKey: ['orders', 'mine'],
-    queryFn: () => listMyOrdersRequest(accessToken!),
-    enabled: status === 'authenticated' && !!accessToken,
+    queryFn: () => listMyOrdersRequest(auth.accessToken!),
+    enabled: auth.ready,
   });
 
-  if (status !== 'authenticated' || !user || !accessToken) {
-    return (
-      <main className="flex-1 p-6">
-        <p className="text-gray-500">Loading…</p>
-      </main>
-    );
+  if (!auth.ready) {
+    return <PageLoading />;
   }
 
-  const orders = ordersQuery.data?.orders ?? [];
+  const { user } = auth;
+  const all = ordersQuery.data?.orders ?? [];
+  // An order's two parties see the same row from opposite sides (Section 19
+  // doesn't distinguish "buyer view" vs "seller view" structurally) — the
+  // role label and filter are the only places that distinction surfaces,
+  // purely for the viewer's own orientation.
+  const roleOf = (buyerId: string) => (buyerId === user.id ? 'BUYING' : 'SELLING');
+  const orders = all.filter((o) => filter === 'ALL' || roleOf(o.buyerId) === filter);
+  const toPay = all.filter((o) => o.buyerId === user.id && o.status === 'PENDING_PAYMENT').length;
+
+  const tabs: { id: Filter; label: string }[] = [
+    { id: 'ALL', label: 'All' },
+    { id: 'BUYING', label: 'Buying' },
+    { id: 'SELLING', label: 'Selling' },
+  ];
 
   return (
-    <main className="mx-auto w-full max-w-3xl flex-1 p-6">
-      <h1 className="mb-6 text-2xl font-semibold">My orders</h1>
+    <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-10">
+      <PageHeader
+        title="My orders"
+        subtitle={
+          toPay > 0
+            ? `${toPay} ${toPay === 1 ? 'order is' : 'orders are'} waiting for your payment.`
+            : 'Wins and sales show up here.'
+        }
+      />
 
-      {ordersQuery.isLoading && <p className="text-gray-500">Loading…</p>}
-      {ordersQuery.isError && <p className="text-red-600">Failed to load your orders.</p>}
+      <div role="tablist" aria-label="Filter orders" className="mb-6 flex gap-2">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={filter === t.id}
+            onClick={() => setFilter(t.id)}
+            className={`rounded-full border-2 border-ink px-4 py-1.5 text-sm font-semibold transition-colors ${
+              filter === t.id ? 'bg-ink text-cream' : 'bg-white hover:bg-cream-2'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {ordersQuery.isLoading && (
+        <ul className="flex flex-col gap-3" aria-busy="true">
+          {[0, 1, 2].map((i) => (
+            <li key={i}>
+              <Skeleton className="h-20 w-full" />
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {ordersQuery.isError && (
+        <PageMessage title="Couldn't load your orders" body="Check your connection and refresh to try again." />
+      )}
+
       {!ordersQuery.isLoading && !ordersQuery.isError && orders.length === 0 && (
-        <p className="text-gray-500">No orders yet — orders appear here once you win an auction.</p>
+        <PageMessage
+          mascotColor="#f5c94b"
+          title={all.length === 0 ? 'No orders yet' : `No ${filter.toLowerCase()} orders`}
+          body="Orders appear here once you win an auction or someone wins one of yours."
+          action={all.length === 0 ? <ButtonLink href="/auctions">Browse auctions</ButtonLink> : undefined}
+        />
       )}
 
       <ul className="flex flex-col gap-3">
         {orders.map((order) => {
-          // An order's two parties see the same row from opposite sides
-          // (Section 19 doesn't distinguish "buyer view" vs "seller view"
-          // structurally) — this label is the only place that distinction
-          // is surfaced, purely for the viewer's own orientation.
-          const role = order.buyerId === user.id ? 'Buying' : 'Selling';
+          const buying = order.buyerId === user.id;
+          const needsPayment = buying && order.status === 'PENDING_PAYMENT';
           return (
             <li key={order.id}>
               <Link
                 href={`/orders/${order.id}`}
-                className="flex items-center justify-between rounded border border-gray-200 px-4 py-3 hover:bg-gray-50"
+                className="group flex flex-wrap items-center justify-between gap-4 rounded-2xl border-2 border-ink bg-white p-4 shadow-hard-sm transition-transform hover:-translate-y-0.5 hover:shadow-hard"
               >
-                <div>
-                  <p className="text-sm text-gray-500">{role}</p>
-                  <p className="font-medium">{STATUS_LABEL[order.status] ?? order.status}</p>
+                <div className="flex items-center gap-4">
+                  <span
+                    className={`flex h-12 w-12 items-center justify-center rounded-full border-2 border-ink font-display text-sm font-extrabold ${
+                      buying ? 'bg-yellow' : 'bg-cyan'
+                    }`}
+                  >
+                    {buying ? 'Buy' : 'Sell'}
+                  </span>
+                  <div>
+                    <p className="font-display text-lg font-bold">
+                      {buying ? 'You won an auction' : 'You sold an item'}
+                    </p>
+                    <p className="text-sm text-ink/70">
+                      Order {order.id.slice(0, 8)} &middot; {new Date(order.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
                 </div>
-                <p className="font-semibold">{formatCents(order.amountCents)}</p>
+                <div className="flex items-center gap-4">
+                  <OrderStatusPill status={order.status} />
+                  <p className="font-display text-xl font-extrabold">{formatCents(order.amountCents)}</p>
+                  {needsPayment && (
+                    <span className="rounded-full border-2 border-ink bg-yellow px-3 py-1 text-sm font-bold">Pay now</span>
+                  )}
+                </div>
               </Link>
             </li>
           );

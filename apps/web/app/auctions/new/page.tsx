@@ -3,42 +3,56 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useState, type ReactNode } from 'react';
+import { useForm, useWatch } from 'react-hook-form';
 import { ApiError } from '@/lib/apiClient';
 import { createAuctionRequest, publishAuctionRequest, startAuctionRequest } from '@/lib/auctions';
+import { CATEGORY_DISPLAY } from '@/lib/categoryDisplay';
 import { AUCTION_CATEGORIES, AUCTION_CONDITIONS } from '@/lib/types/auction';
 import { computeEndTime, DURATION_LABELS } from '@/lib/duration';
-import { formatCategory } from '@/lib/format';
+import { formatCategory, formatCents } from '@/lib/format';
 import { isAllowedImageFile, requestPresignedUpload, uploadToPresignedUrl } from '@/lib/uploads';
+import { useRequireAuth } from '@/lib/useRequireAuth';
 import { createAuctionFormSchema, type CreateAuctionFormValues } from '@/lib/validation/auction';
-import { useAuthStore } from '@/store/authStore';
+import { Mascot } from '../../components/Mascot';
+import { Button } from '../../components/ui/Button';
+import { Field, SelectField, TextArea, TextField, inputClass } from '../../components/ui/Field';
+import { Notice } from '../../components/ui/Notice';
+import { PageHeader, PageLoading } from '../../components/ui/Page';
 
 const MAX_IMAGES = 10;
+
+function Section({ step, title, children }: { step: number; title: string; children: ReactNode }) {
+  return (
+    <section className="rounded-2xl border-2 border-ink bg-white p-5 shadow-hard-sm sm:p-6">
+      <h2 className="mb-4 flex items-center gap-3 font-display text-xl font-extrabold">
+        <span className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-ink bg-cyan text-sm">
+          {step}
+        </span>
+        {title}
+      </h2>
+      <div className="flex flex-col gap-4">{children}</div>
+    </section>
+  );
+}
 
 // Chains three backend calls (create -> publish -> start) into one submit.
 // The backend deliberately keeps these as separate lifecycle actions
 // (ADR-0009/0010) so a real seller dashboard can offer them independently
-// later — but a seller using this simple form almost certainly wants their
-// auction live immediately, not sitting in DRAFT/PUBLISHED limbo waiting
-// for more UI that doesn't exist yet (that's WEB-003 territory).
+// — but a seller using this simple form almost certainly wants their
+// auction live immediately, not sitting in DRAFT/PUBLISHED limbo.
 export default function NewAuctionPage() {
   const router = useRouter();
-  const status = useAuthStore((state) => state.status);
-  const accessToken = useAuthStore((state) => state.accessToken);
+  const auth = useRequireAuth();
   const [stageError, setStageError] = useState<{ message: string; draftAuctionId?: string } | null>(null);
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (status === 'anonymous') {
-      router.replace('/login');
-    }
-  }, [status, router]);
+  const [dragging, setDragging] = useState(false);
 
   const {
     register,
+    control,
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<CreateAuctionFormValues>({
@@ -46,13 +60,12 @@ export default function NewAuctionPage() {
     defaultValues: { durationHours: '24' },
   });
 
-  if (status !== 'authenticated' || !accessToken) {
-    return (
-      <main className="flex-1 p-6">
-        <p className="text-gray-500">Loading…</p>
-      </main>
-    );
+  const watched = useWatch({ control });
+
+  if (!auth.ready) {
+    return <PageLoading />;
   }
+  const { accessToken } = auth;
 
   // Uploads happen eagerly on file selection, not deferred to submit — the
   // presigned-POST pattern (lib/uploads.ts) is specifically designed for
@@ -122,9 +135,8 @@ export default function NewAuctionPage() {
       await startAuctionRequest(accessToken, auctionId);
     } catch (err) {
       // The auction row now genuinely exists (as DRAFT or PUBLISHED) even
-      // though this step failed — there's no seller dashboard yet to
-      // finish the job from, so the honest thing is to say so and link to
-      // it, not to pretend nothing happened.
+      // though this step failed, so say so and link to it rather than
+      // pretend nothing happened; My auctions can finish the job.
       setStageError({
         message:
           err instanceof ApiError
@@ -138,185 +150,225 @@ export default function NewAuctionPage() {
     router.push(`/auctions/${auctionId}`);
   };
 
+  // Live preview, built from what's typed. Purely presentational; the
+  // server validates the real values on submit.
+  const previewCategory = watched.category ? CATEGORY_DISPLAY[watched.category] : null;
+  const previewPrice = Number(watched.startingPrice);
+  const previewPriceText =
+    watched.startingPrice && Number.isFinite(previewPrice) && previewPrice >= 0
+      ? formatCents(Math.round(previewPrice * 100))
+      : '$0.00';
+
   return (
-    <main className="mx-auto flex w-full max-w-lg flex-1 flex-col gap-4 p-6">
-      <h1 className="text-2xl font-semibold">Create an auction</h1>
-      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-3">
-        <div>
-          <label htmlFor="title" className="block text-sm font-medium text-gray-700">
-            Title
-          </label>
-          <input
-            id="title"
-            type="text"
-            {...register('title')}
-            className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
-          />
-          {errors.title && <p className="mt-1 text-sm text-red-600">{errors.title.message}</p>}
-        </div>
+    <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-10">
+      <PageHeader title="Sell an item" subtitle="Fill this in and your auction goes live right away." />
 
-        <div>
-          <label htmlFor="description" className="block text-sm font-medium text-gray-700">
-            Description
-          </label>
-          <textarea
-            id="description"
-            rows={4}
-            {...register('description')}
-            className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
-          />
-          {errors.description && <p className="mt-1 text-sm text-red-600">{errors.description.message}</p>}
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label htmlFor="category" className="block text-sm font-medium text-gray-700">
-              Category
-            </label>
-            <select
-              id="category"
-              {...register('category')}
-              className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
-            >
-              {AUCTION_CATEGORIES.map((category) => (
-                <option key={category} value={category}>
-                  {formatCategory(category)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="condition" className="block text-sm font-medium text-gray-700">
-              Condition
-            </label>
-            <select
-              id="condition"
-              {...register('condition')}
-              className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
-            >
-              {AUCTION_CONDITIONS.map((condition) => (
-                <option key={condition} value={condition}>
-                  {formatCategory(condition)}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label htmlFor="startingPrice" className="block text-sm font-medium text-gray-700">
-              Starting price ($)
-            </label>
-            <input
-              id="startingPrice"
-              type="text"
-              inputMode="decimal"
-              placeholder="0.00"
-              {...register('startingPrice')}
-              className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+      <div className="grid items-start gap-8 lg:grid-cols-[1fr_320px]">
+        <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-6">
+          <Section step={1} title="What are you selling?">
+            <TextField
+              id="title"
+              label="Title"
+              placeholder="e.g. 1985 Air Jordan 1, size 10"
+              error={errors.title?.message}
+              {...register('title')}
             />
-            {errors.startingPrice && <p className="mt-1 text-sm text-red-600">{errors.startingPrice.message}</p>}
-          </div>
-          <div>
-            <label htmlFor="reservePrice" className="block text-sm font-medium text-gray-700">
-              Reserve price ($, optional)
-            </label>
-            <input
-              id="reservePrice"
-              type="text"
-              inputMode="decimal"
-              placeholder="0.00"
-              {...register('reservePrice')}
-              className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+            <TextArea
+              id="description"
+              label="Description"
+              rows={5}
+              hint="Say what it is, its history, and any flaws. Honest listings get more bids."
+              error={errors.description?.message}
+              {...register('description')}
             />
-            {errors.reservePrice && <p className="mt-1 text-sm text-red-600">{errors.reservePrice.message}</p>}
-          </div>
-        </div>
-
-        <div>
-          <label htmlFor="images" className="block text-sm font-medium text-gray-700">
-            Photos (optional, up to {MAX_IMAGES})
-          </label>
-          <input
-            id="images"
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            multiple
-            disabled={uploading || imageUrls.length >= MAX_IMAGES}
-            onChange={(event) => {
-              void handleFilesSelected(event.target.files);
-              // Reset so selecting the exact same file again (e.g. after
-              // removing it) still fires a change event.
-              event.target.value = '';
-            }}
-            className="mt-1 block w-full text-sm"
-          />
-          {uploading && <p className="mt-1 text-sm text-gray-500">Uploading…</p>}
-          {uploadError && <p className="mt-1 text-sm text-red-600">{uploadError}</p>}
-          {imageUrls.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {imageUrls.map((url) => (
-                <div key={url} className="relative">
-                  {/* eslint-disable-next-line @next/next/no-img-element --
-                      These come from our own object storage (dev: local
-                      s3mock, prod: R2), whose domain isn't fixed yet — using
-                      next/image here would require remotePatterns config for
-                      a domain that doesn't exist until deployment. Revisit
-                      once the production storage domain is known. */}
-                  <img src={url} alt="" className="h-20 w-20 rounded border border-gray-200 object-cover" />
-                  <button
-                    type="button"
-                    onClick={() => removeImage(url)}
-                    aria-label="Remove photo"
-                    className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-black text-xs text-white"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <SelectField id="category" label="Category" {...register('category')}>
+                {AUCTION_CATEGORIES.map((category) => (
+                  <option key={category} value={category}>
+                    {formatCategory(category)}
+                  </option>
+                ))}
+              </SelectField>
+              <SelectField id="condition" label="Condition" {...register('condition')}>
+                {AUCTION_CONDITIONS.map((condition) => (
+                  <option key={condition} value={condition}>
+                    {formatCategory(condition)}
+                  </option>
+                ))}
+              </SelectField>
             </div>
-          )}
-        </div>
+          </Section>
 
-        <div>
-          <label htmlFor="durationHours" className="block text-sm font-medium text-gray-700">
-            Duration
-          </label>
-          <select
-            id="durationHours"
-            {...register('durationHours')}
-            className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
-          >
-            {Object.entries(DURATION_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </div>
+          <Section step={2} title="Photos">
+            <div>
+              <label
+                htmlFor="images"
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setDragging(true);
+                }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setDragging(false);
+                  void handleFilesSelected(event.dataTransfer.files);
+                }}
+                className={`flex cursor-pointer flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-ink px-4 py-8 text-center transition-colors ${
+                  dragging ? 'bg-yellow' : 'bg-cream hover:bg-cream-2'
+                } ${uploading || imageUrls.length >= MAX_IMAGES ? 'pointer-events-none opacity-60' : ''}`}
+              >
+                <span className="font-display text-lg font-bold">
+                  {uploading ? 'Uploading…' : 'Drop photos here or click to browse'}
+                </span>
+                <span className="text-sm text-ink/70">
+                  JPEG, PNG or WebP. Up to {MAX_IMAGES} photos ({imageUrls.length} added). The first is the cover.
+                </span>
+              </label>
+              <input
+                id="images"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+                disabled={uploading || imageUrls.length >= MAX_IMAGES}
+                className="sr-only"
+                onChange={(event) => {
+                  void handleFilesSelected(event.target.files);
+                  // Reset so selecting the exact same file again (e.g. after
+                  // removing it) still fires a change event.
+                  event.target.value = '';
+                }}
+              />
+              {uploadError && (
+                <div className="mt-3">
+                  <Notice tone="error">{uploadError}</Notice>
+                </div>
+              )}
+            </div>
 
-        {stageError && (
-          <div className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">
-            <p>{stageError.message}</p>
-            {stageError.draftAuctionId && (
-              <p className="mt-1">
-                <Link href={`/auctions/${stageError.draftAuctionId}`} className="underline">
-                  View the auction
-                </Link>
-              </p>
+            {imageUrls.length > 0 && (
+              <ul className="grid grid-cols-3 gap-3 sm:grid-cols-5">
+                {imageUrls.map((url, i) => (
+                  <li key={url} className="relative aspect-square">
+                    {/* eslint-disable-next-line @next/next/no-img-element --
+                        These come from our own object storage (dev: local
+                        s3mock, prod: R2), whose domain isn't fixed yet — using
+                        next/image here would require remotePatterns config for
+                        a domain that doesn't exist until deployment. */}
+                    <img src={url} alt={`Photo ${i + 1}`} className="h-full w-full rounded-xl border-2 border-ink object-cover" />
+                    {i === 0 && (
+                      <span className="absolute bottom-1 left-1 rounded-full border-2 border-ink bg-yellow px-1.5 text-[10px] font-bold">
+                        Cover
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeImage(url)}
+                      aria-label={`Remove photo ${i + 1}`}
+                      className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full border-2 border-ink bg-white text-sm font-bold leading-none hover:bg-pink"
+                    >
+                      &times;
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
-          </div>
-        )}
+          </Section>
 
-        <button
-          type="submit"
-          disabled={isSubmitting || uploading}
-          className="rounded bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {isSubmitting ? 'Creating…' : 'Create and publish'}
-        </button>
-      </form>
+          <Section step={3} title="Price and timing">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Starting price ($)" htmlFor="startingPrice" error={errors.startingPrice?.message}>
+                <input
+                  id="startingPrice"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  aria-invalid={errors.startingPrice ? true : undefined}
+                  aria-describedby={errors.startingPrice ? 'startingPrice-error' : undefined}
+                  className={inputClass(!!errors.startingPrice)}
+                  {...register('startingPrice')}
+                />
+              </Field>
+              <Field
+                label="Reserve price ($, optional)"
+                htmlFor="reservePrice"
+                hint="The lowest price you'll accept."
+                error={errors.reservePrice?.message}
+              >
+                <input
+                  id="reservePrice"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  aria-invalid={errors.reservePrice ? true : undefined}
+                  aria-describedby={errors.reservePrice ? 'reservePrice-error' : 'reservePrice-hint'}
+                  className={inputClass(!!errors.reservePrice)}
+                  {...register('reservePrice')}
+                />
+              </Field>
+            </div>
+            <SelectField id="durationHours" label="Duration" {...register('durationHours')}>
+              {Object.entries(DURATION_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </SelectField>
+          </Section>
+
+          {stageError && (
+            <Notice tone="error">
+              <p>{stageError.message}</p>
+              {stageError.draftAuctionId && (
+                <p className="mt-1">
+                  <Link href={`/auctions/${stageError.draftAuctionId}`} className="font-semibold underline underline-offset-4">
+                    View the auction
+                  </Link>{' '}
+                  or{' '}
+                  <Link href="/my-auctions" className="font-semibold underline underline-offset-4">
+                    finish it from My auctions
+                  </Link>
+                </p>
+              )}
+            </Notice>
+          )}
+
+          <Button type="submit" disabled={isSubmitting || uploading} className="w-full sm:w-fit">
+            {isSubmitting ? 'Publishing…' : uploading ? 'Waiting for uploads…' : 'Create and publish'}
+          </Button>
+        </form>
+
+        <aside aria-label="Listing preview" className="lg:sticky lg:top-24">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink/60">Live preview</p>
+          <div className="overflow-hidden rounded-2xl border-2 border-ink bg-white shadow-hard-sm">
+            <div className="relative flex aspect-square items-center justify-center overflow-hidden border-b-2 border-ink bg-cream-2">
+              {imageUrls[0] ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={imageUrls[0]} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <Mascot className="h-20 w-20 opacity-70" />
+              )}
+              {previewCategory && (
+                <span className="absolute left-2 top-2 rounded-full border-2 border-ink bg-cream px-2 py-0.5 text-xs font-semibold">
+                  {previewCategory.emoji} {previewCategory.label}
+                </span>
+              )}
+            </div>
+            <div className="flex flex-col gap-2 p-3">
+              <p className="line-clamp-2 min-h-10 font-display text-base font-bold leading-tight">
+                {watched.title || 'Your title appears here'}
+              </p>
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-ink/60">Starting bid</p>
+                <p className="font-display text-lg font-extrabold">{previewPriceText}</p>
+              </div>
+            </div>
+          </div>
+          <p className="mt-3 text-sm text-ink/70">
+            This is how your listing looks in browse. A bid in the last 30 seconds extends the clock, so plan for a
+            fair finish.
+          </p>
+        </aside>
+      </div>
     </main>
   );
 }

@@ -9,6 +9,9 @@ import { ApiError } from '@/lib/apiClient';
 import { getBidErrorMessage } from '@/lib/bidErrors';
 import { placeBidRequest } from '@/lib/bids';
 import { formatCents } from '@/lib/format';
+import { Button } from '../../components/ui/Button';
+import { Field, inputClass } from '../../components/ui/Field';
+import { Notice } from '../../components/ui/Notice';
 
 const bidFormSchema = z.object({
   amount: z
@@ -18,6 +21,11 @@ const bidFormSchema = z.object({
     .refine((value) => Number(value) > 0, 'Must be greater than 0'),
 });
 type BidFormValues = z.infer<typeof bidFormSchema>;
+
+// Convenience only: these pre-fill the field with (current price + step).
+// The server still decides whether any bid is valid — nothing here is
+// trusted (Section 9: never trust client-controlled prices).
+const QUICK_STEPS_CENTS = [100, 500, 1000];
 
 export function BidForm({
   auctionId,
@@ -31,17 +39,20 @@ export function BidForm({
   const queryClient = useQueryClient();
   const [serverError, setServerError] = useState<string | null>(null);
   const [extended, setExtended] = useState(false);
+  const [placed, setPlaced] = useState<number | null>(null);
 
   const {
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<BidFormValues>({ resolver: zodResolver(bidFormSchema) });
 
   const onSubmit = async (values: BidFormValues) => {
     setServerError(null);
     setExtended(false);
+    setPlaced(null);
     const amountCents = Math.round(Number(values.amount) * 100);
     // A fresh key per submit, not per component mount — each click is a
     // genuinely new bid attempt from the user's perspective (Section 11).
@@ -52,6 +63,7 @@ export function BidForm({
     try {
       const result = await placeBidRequest(accessToken, auctionId, amountCents, idempotencyKey);
       setExtended(result.auctionExtended);
+      setPlaced(amountCents);
       reset();
       // Both queries need to reflect the new bid immediately — the price
       // shown, and the history list it now appears in — rather than
@@ -65,31 +77,60 @@ export function BidForm({
     }
   };
 
+  const fillQuick = (stepCents: number) => {
+    setValue('amount', ((currentPriceCents + stepCents) / 100).toFixed(2), { shouldValidate: true });
+  };
+
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-2 rounded border border-gray-200 p-4">
-      <label htmlFor="amount" className="text-sm font-medium text-gray-700">
-        Your bid — must exceed {formatCents(currentPriceCents)}
-      </label>
-      <div className="flex gap-2">
-        <input
-          id="amount"
-          type="text"
-          inputMode="decimal"
-          placeholder="0.00"
-          {...register('amount')}
-          className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm"
-        />
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="rounded bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {isSubmitting ? 'Placing bid…' : 'Place bid'}
-        </button>
+    <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-3">
+      <Field
+        label={`Your bid (more than ${formatCents(currentPriceCents)})`}
+        htmlFor="amount"
+        error={errors.amount?.message}
+      >
+        <div className="relative">
+          <span aria-hidden className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 font-display font-bold">
+            $
+          </span>
+          <input
+            id="amount"
+            type="text"
+            inputMode="decimal"
+            autoComplete="off"
+            placeholder="0.00"
+            aria-invalid={errors.amount ? true : undefined}
+            aria-describedby={errors.amount ? 'amount-error' : undefined}
+            {...register('amount')}
+            className={`${inputClass(!!errors.amount)} pl-8 font-display text-lg font-bold`}
+          />
+        </div>
+      </Field>
+
+      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Quick bid amounts">
+        <span className="text-xs font-semibold uppercase tracking-wide text-ink/60">Quick</span>
+        {QUICK_STEPS_CENTS.map((step) => (
+          <button
+            key={step}
+            type="button"
+            onClick={() => fillQuick(step)}
+            className="rounded-full border-2 border-ink bg-white px-3 py-1 text-sm font-semibold transition-colors hover:bg-yellow"
+          >
+            +{formatCents(step).replace('.00', '')}
+          </button>
+        ))}
       </div>
-      {errors.amount && <p className="text-sm text-red-600">{errors.amount.message}</p>}
-      {serverError && <p className="text-sm text-red-600">{serverError}</p>}
-      {extended && <p className="text-sm text-green-700">Your bid extended the auction by 30 seconds!</p>}
+
+      <Button type="submit" disabled={isSubmitting} className="w-full">
+        {isSubmitting ? 'Placing bid…' : 'Place bid'}
+      </Button>
+
+      {serverError && <Notice tone="error">{serverError}</Notice>}
+      {placed !== null && !serverError && (
+        <Notice tone="success">
+          Bid of {formatCents(placed)} placed.
+          {extended && ' It landed in the closing seconds, so the clock was extended by 30 seconds.'}
+        </Notice>
+      )}
     </form>
   );
 }

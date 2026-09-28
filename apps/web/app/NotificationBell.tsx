@@ -62,27 +62,27 @@ export function NotificationBell() {
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="relative rounded p-1 text-sm hover:text-gray-600"
+        className="relative flex h-8 w-8 items-center justify-center rounded-full border-2 border-ink bg-white text-sm hover:bg-cream-2"
         aria-label="Notifications"
       >
-        Notifications
+        {'\u{1F514}'}
         {unreadCount > 0 && (
-          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold text-white">
+          <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full border border-ink bg-pink px-1 text-[10px] font-semibold text-ink">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 z-10 mt-2 w-80 rounded border border-gray-200 bg-white shadow-lg">
-          <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2">
-            <span className="text-sm font-medium">Notifications</span>
+        <div className="absolute right-0 z-10 mt-2 w-80 rounded-2xl border-2 border-ink bg-white shadow-hard">
+          <div className="flex items-center justify-between border-b-2 border-ink px-3 py-2">
+            <span className="font-display text-sm font-bold">Notifications</span>
             {unreadCount > 0 && (
               <button
                 type="button"
                 onClick={() => markAllRead.mutate()}
                 disabled={markAllRead.isPending}
-                className="text-xs text-gray-500 underline hover:text-gray-700 disabled:opacity-50"
+                className="text-xs font-medium text-ink/60 underline hover:text-ink disabled:opacity-50"
               >
                 Mark all read
               </button>
@@ -90,12 +90,12 @@ export function NotificationBell() {
           </div>
 
           <ul className="max-h-96 overflow-y-auto">
-            {notifications.length === 0 && <li className="px-3 py-4 text-sm text-gray-500">No notifications yet.</li>}
+            {notifications.length === 0 && <li className="px-3 py-4 text-sm text-ink/50">No notifications yet.</li>}
             {notifications.map((notification) => {
               const { message, href } = describeNotification(notification);
               const unread = !notification.readAt;
               return (
-                <li key={notification.id} className={unread ? 'bg-blue-50' : undefined}>
+                <li key={notification.id} className={unread ? 'bg-yellow/20' : undefined}>
                   <Link
                     href={href}
                     onClick={() => {
@@ -104,10 +104,10 @@ export function NotificationBell() {
                         markRead.mutate(notification.id);
                       }
                     }}
-                    className="block border-b border-gray-100 px-3 py-2 text-sm hover:bg-gray-50"
+                    className="block border-b border-ink/10 px-3 py-2 text-sm hover:bg-cream-2"
                   >
                     <p>{message}</p>
-                    <p className="mt-1 text-xs text-gray-400">{new Date(notification.createdAt).toLocaleString()}</p>
+                    <p className="mt-1 text-xs text-ink/40">{new Date(notification.createdAt).toLocaleString()}</p>
                   </Link>
                 </li>
               );

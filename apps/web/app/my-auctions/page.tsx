@@ -1,12 +1,22 @@
 'use client';
 
 import { useQueryClient, useQuery } from '@tanstack/react-query';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { useState } from 'react';
 import { listAuctionsRequest } from '@/lib/auctions';
-import { useAuthStore } from '@/store/authStore';
+import type { AuctionStatus } from '@/lib/types/auction';
+import { useRequireAuth } from '@/lib/useRequireAuth';
+import { ButtonLink } from '../components/ui/Button';
+import { PageHeader, PageLoading, PageMessage, Skeleton } from '../components/ui/Page';
 import { AuctionRow } from './AuctionRow';
+
+type Filter = 'ALL' | 'LIVE' | 'DRAFTS' | 'DONE';
+
+const FILTERS: { id: Filter; label: string; match: (s: AuctionStatus) => boolean }[] = [
+  { id: 'ALL', label: 'All', match: () => true },
+  { id: 'LIVE', label: 'Live', match: (s) => s === 'ACTIVE' || s === 'PAUSED' || s === 'PUBLISHED' },
+  { id: 'DRAFTS', label: 'Drafts', match: (s) => s === 'DRAFT' },
+  { id: 'DONE', label: 'Ended', match: (s) => s === 'ENDED' || s === 'CANCELLED' },
+];
 
 // A plain useQuery, not useInfiniteQuery (contrast with /auctions, WEB-001):
 // the backend caps a page at 50 (schema.ts), and a seller's OWN listing
@@ -15,30 +25,18 @@ import { AuctionRow } from './AuctionRow';
 // that doesn't exist yet (Section 62). Revisit if a seller with 50+
 // listings ever shows up for real.
 export default function MyAuctionsPage() {
-  const router = useRouter();
-  const status = useAuthStore((state) => state.status);
-  const user = useAuthStore((state) => state.user);
-  const accessToken = useAuthStore((state) => state.accessToken);
+  const auth = useRequireAuth();
   const queryClient = useQueryClient();
+  const [filter, setFilter] = useState<Filter>('ALL');
 
-  useEffect(() => {
-    if (status === 'anonymous') {
-      router.replace('/login');
-    }
-  }, [status, router]);
-
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['auctions', 'mine', user?.id],
-    queryFn: () => listAuctionsRequest({ sellerId: user!.id, limit: 50, accessToken }),
-    enabled: status === 'authenticated' && !!user,
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['auctions', 'mine', auth.user?.id],
+    queryFn: () => listAuctionsRequest({ sellerId: auth.user!.id, limit: 50, accessToken: auth.accessToken }),
+    enabled: auth.ready,
   });
 
-  if (status !== 'authenticated' || !user || !accessToken) {
-    return (
-      <main className="flex-1 p-6">
-        <p className="text-gray-500">Loading…</p>
-      </main>
-    );
+  if (!auth.ready) {
+    return <PageLoading />;
   }
 
   const invalidate = () => {
@@ -47,37 +45,86 @@ export default function MyAuctionsPage() {
     // CACHE-001's own server-side Redis cache already invalidates itself
     // independently on the backend — this just makes sure THIS browser
     // tab's TanStack Query cache doesn't keep showing a stale status after
-    // a pause/cancel/start click. Correctness-cheap: worst case is a few
-    // extra refetches, not a few missed ones.
+    // a pause/cancel/start click.
     void queryClient.invalidateQueries({ queryKey: ['auctions'] });
   };
 
-  const auctions = data?.auctions ?? [];
+  const all = data?.auctions ?? [];
+  const active = FILTERS.find((f) => f.id === filter)!;
+  const visible = all.filter((a) => active.match(a.status));
 
   return (
-    <main className="mx-auto w-full max-w-3xl flex-1 p-6">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">My auctions</h1>
-        <Link href="/auctions/new" className="text-sm underline hover:text-gray-600">
-          Sell an item
-        </Link>
+    <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-10">
+      <PageHeader
+        title="My auctions"
+        subtitle="Everything you're selling, in one place."
+        action={<ButtonLink href="/auctions/new">Sell an item</ButtonLink>}
+      />
+
+      <div role="tablist" aria-label="Filter my auctions" className="mb-6 flex flex-wrap gap-2">
+        {FILTERS.map((f) => {
+          const count = all.filter((a) => f.match(a.status)).length;
+          const selected = filter === f.id;
+          return (
+            <button
+              key={f.id}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              onClick={() => setFilter(f.id)}
+              className={`rounded-full border-2 border-ink px-4 py-1.5 text-sm font-semibold transition-colors ${
+                selected ? 'bg-ink text-cream' : 'bg-white hover:bg-cream-2'
+              }`}
+            >
+              {f.label}
+              {!isLoading && <span className={`ml-1.5 ${selected ? 'text-cream/70' : 'text-ink/60'}`}>{count}</span>}
+            </button>
+          );
+        })}
       </div>
 
-      {isLoading && <p className="text-gray-500">Loading…</p>}
-      {isError && <p className="text-red-600">Failed to load your auctions.</p>}
-      {!isLoading && !isError && auctions.length === 0 && (
-        <p className="text-gray-500">
-          You haven&apos;t created any auctions yet.{' '}
-          <Link href="/auctions/new" className="underline">
-            Create one
-          </Link>
-          .
-        </p>
+      {isLoading && (
+        <ul className="flex flex-col gap-3" aria-busy="true">
+          {[0, 1, 2].map((i) => (
+            <li key={i}>
+              <Skeleton className="h-28 w-full" />
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {isError && (
+        <PageMessage
+          title="Couldn't load your auctions"
+          body="Check your connection and try again."
+          action={
+            <button
+              type="button"
+              onClick={() => void refetch()}
+              className="rounded-full border-2 border-ink bg-white px-5 py-2 text-sm font-semibold shadow-hard-sm"
+            >
+              Try again
+            </button>
+          }
+        />
+      )}
+
+      {!isLoading && !isError && visible.length === 0 && (
+        <PageMessage
+          mascotColor="#f5c94b"
+          title={all.length === 0 ? 'You haven’t listed anything yet' : `No ${active.label.toLowerCase()} auctions`}
+          body={
+            all.length === 0
+              ? 'List your first item and it can be live in about a minute.'
+              : 'Try a different filter to see the rest.'
+          }
+          action={all.length === 0 ? <ButtonLink href="/auctions/new">Create an auction</ButtonLink> : undefined}
+        />
       )}
 
       <ul className="flex flex-col gap-3">
-        {auctions.map((auction) => (
-          <AuctionRow key={auction.id} auction={auction} accessToken={accessToken} onChanged={invalidate} />
+        {visible.map((auction) => (
+          <AuctionRow key={auction.id} auction={auction} accessToken={auth.accessToken} onChanged={invalidate} />
         ))}
       </ul>
     </main>

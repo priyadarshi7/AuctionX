@@ -9,6 +9,10 @@ import { ApiError } from '@/lib/apiClient';
 import { loginRequest } from '@/lib/auth';
 import { loginSchema, type LoginFormValues } from '@/lib/validation/auth';
 import { useAuthStore } from '@/store/authStore';
+import { AuthShell, PasswordField } from '../components/ui/AuthShell';
+import { Button } from '../components/ui/Button';
+import { TextField } from '../components/ui/Field';
+import { Notice } from '../components/ui/Notice';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -37,50 +41,45 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-4 p-6">
-      <h1 className="text-2xl font-semibold">Log in</h1>
-      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-3">
-        <div>
-          <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-            Email
-          </label>
-          <input
-            id="email"
-            type="email"
-            autoComplete="email"
-            {...register('email')}
-            className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
-          />
-          {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>}
-        </div>
-        <div>
-          <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-            Password
-          </label>
-          <input
-            id="password"
-            type="password"
-            autoComplete="current-password"
-            {...register('password')}
-            className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
-          />
-          {errors.password && <p className="mt-1 text-sm text-red-600">{errors.password.message}</p>}
-        </div>
-        {serverError && <p className="text-sm text-red-600">{serverError}</p>}
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="rounded bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
+    <AuthShell
+      title="Welcome back"
+      subtitle="Log in to bid, sell and check your orders."
+      footer={
+        <>
+          New here?{' '}
+          <Link href="/register" className="font-semibold text-ink underline underline-offset-4">
+            Create an account
+          </Link>
+        </>
+      }
+      panelTitle="The floor's open. Your watchlist is waiting."
+      panelPoints={[
+        'Live bids, updated the instant they land',
+        'Outbid alerts so you never miss a win',
+        'Pay and track every order in one place',
+      ]}
+    >
+      <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">
+        <TextField
+          id="email"
+          label="Email"
+          type="email"
+          autoComplete="email"
+          error={errors.email?.message}
+          {...register('email')}
+        />
+        <PasswordField
+          id="password"
+          label="Password"
+          autoComplete="current-password"
+          error={errors.password?.message}
+          {...register('password')}
+        />
+        {serverError && <Notice tone="error">{serverError}</Notice>}
+        <Button type="submit" disabled={isSubmitting} className="mt-1 w-full">
           {isSubmitting ? 'Logging in…' : 'Log in'}
-        </button>
+        </Button>
       </form>
-      <p className="text-sm text-gray-600">
-        No account?{' '}
-        <Link href="/register" className="underline">
-          Register
-        </Link>
-      </p>
-    </main>
+    </AuthShell>
   );
 }

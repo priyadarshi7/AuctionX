@@ -4,11 +4,25 @@ import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getAuctionRequest, listBidsRequest } from '@/lib/auctions';
-import { formatCategory, formatCents } from '@/lib/format';
+import { CATEGORY_DISPLAY } from '@/lib/categoryDisplay';
+import { formatCents } from '@/lib/format';
 import { useAuctionSocket } from '@/lib/useAuctionSocket';
 import { useTimeRemaining } from '@/lib/useTimeRemaining';
 import { useAuthStore } from '@/store/authStore';
+import { ButtonLink } from '../../components/ui/Button';
+import { Notice } from '../../components/ui/Notice';
+import { PageMessage, Skeleton } from '../../components/ui/Page';
+import { AuctionStatusPill } from '../../components/ui/StatusPill';
 import { BidForm } from './BidForm';
+import { Gallery } from './Gallery';
+
+const CONDITION_LABEL: Record<string, string> = {
+  NEW: 'New',
+  LIKE_NEW: 'Like new',
+  GOOD: 'Good',
+  FAIR: 'Fair',
+  POOR: 'Poor',
+};
 
 export default function AuctionDetailPage() {
   const params = useParams<{ id: string }>();
@@ -30,130 +44,220 @@ export default function AuctionDetailPage() {
     enabled: auctionQuery.isSuccess,
   });
 
-  // Replaces ADR-0016's 5s poll: live updates now arrive as a WebSocket
-  // signal (ADR-0020/0021) that invalidates these same two query keys,
-  // rather than an unconditional interval. Only connects while ACTIVE —
-  // same condition the old poll used, since nothing changes on a
-  // DRAFT/PUBLISHED/PAUSED/ENDED/CANCELLED auction worth watching live.
+  // Live updates arrive as a WebSocket signal (ADR-0020/0021) that
+  // invalidates these same two query keys. Only connects while ACTIVE —
+  // nothing changes on any other status worth watching live.
   useAuctionSocket(auctionId, auctionQuery.data?.auction.status === 'ACTIVE', accessToken);
 
   const timeRemaining = useTimeRemaining(auctionQuery.data?.auction.endTime ?? null);
 
   if (auctionQuery.isLoading) {
     return (
-      <main className="flex-1 p-6">
-        <p className="text-gray-500">Loading…</p>
+      <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-10" aria-busy="true">
+        <div className="grid gap-10 lg:grid-cols-[1.1fr_1fr]">
+          <Skeleton className="aspect-square w-full" />
+          <div className="flex flex-col gap-4">
+            <Skeleton className="h-10 w-3/4" />
+            <Skeleton className="h-6 w-1/2" />
+            <Skeleton className="h-40 w-full" />
+          </div>
+        </div>
       </main>
     );
   }
 
   if (auctionQuery.isError || !auctionQuery.data) {
     return (
-      <main className="flex-1 p-6">
-        <p className="text-red-600">Auction not found.</p>
+      <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-16">
+        <PageMessage
+          title="We couldn't find that auction"
+          body="It may have been removed, or the link is wrong."
+          action={<ButtonLink href="/auctions">Browse auctions</ButtonLink>}
+        />
       </main>
     );
   }
 
   const { auction } = auctionQuery.data;
   const bids = bidsQuery.data?.bids ?? [];
+  const display = CATEGORY_DISPLAY[auction.category];
+  const isActive = auction.status === 'ACTIVE';
+  const isSeller = !!user && user.id === auction.sellerId;
+  const urgent = isActive && /^\d+s$/.test(timeRemaining);
+
+  // Derived from server data, never client state: the leader is whoever
+  // holds the highest accepted bid right now.
+  const leadingBid = bids.reduce<(typeof bids)[number] | null>(
+    (best, bid) => (best === null || bid.amountCents > best.amountCents ? bid : best),
+    null,
+  );
+  const iHaveBid = !!user && bids.some((bid) => bid.bidderId === user.id);
+  const iAmLeading = !!user && leadingBid?.bidderId === user.id;
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold">{auction.title}</h1>
-        <p className="text-sm text-gray-500">
-          {formatCategory(auction.category)} · {auction.condition} · {auction.status}
-        </p>
+    <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">
+      <nav aria-label="Breadcrumb" className="mb-6 text-sm text-ink/70">
+        <Link href="/auctions" className="font-semibold underline underline-offset-4">
+          Browse
+        </Link>{' '}
+        / {display.label}
+      </nav>
+
+      <div className="grid items-start gap-10 lg:grid-cols-[1.1fr_1fr]">
+        <div className="flex flex-col gap-8">
+          <Gallery images={auction.images} title={auction.title} />
+
+          <section aria-labelledby="about-heading">
+            <h2 id="about-heading" className="font-display text-2xl font-extrabold">
+              About this item
+            </h2>
+            <p className="mt-3 whitespace-pre-wrap text-ink/80">{auction.description}</p>
+            <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
+              <div className="rounded-xl border-2 border-ink bg-white p-3">
+                <dt className="text-ink/60">Condition</dt>
+                <dd className="font-semibold">{CONDITION_LABEL[auction.condition] ?? auction.condition}</dd>
+              </div>
+              <div className="rounded-xl border-2 border-ink bg-white p-3">
+                <dt className="text-ink/60">Starting price</dt>
+                <dd className="font-semibold">{formatCents(auction.startingPriceCents)}</dd>
+              </div>
+            </dl>
+          </section>
+        </div>
+
+        <div className="flex flex-col gap-6 lg:sticky lg:top-24">
+          <div>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <span className="rounded-full border-2 border-ink bg-cream px-2.5 py-0.5 text-xs font-semibold">
+                {display.emoji} {display.label}
+              </span>
+              <AuctionStatusPill status={auction.status} />
+            </div>
+            <h1 className="font-display text-3xl font-extrabold leading-tight tracking-tight sm:text-4xl">
+              {auction.title}
+            </h1>
+          </div>
+
+          <div className="rounded-2xl border-2 border-ink bg-white p-5 shadow-hard">
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-ink/60">
+                  {isActive ? 'Current bid' : 'Final price'}
+                </p>
+                <p className="font-display text-4xl font-extrabold">{formatCents(auction.currentPriceCents)}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs font-semibold uppercase tracking-wide text-ink/60">
+                  {isActive ? 'Time left' : 'Scheduled end'}
+                </p>
+                {isActive ? (
+                  <p
+                    className={`mt-1 inline-flex items-center gap-1.5 rounded-full border-2 border-ink px-3 py-1 font-display text-lg font-extrabold tabular-nums ${
+                      urgent ? 'bg-pink' : 'bg-green'
+                    }`}
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-ink" />
+                    {timeRemaining}
+                  </p>
+                ) : (
+                  <p className="mt-1 font-semibold">
+                    {auction.endTime ? new Date(auction.endTime).toLocaleString() : '—'}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {isActive && (
+              <div className="mt-5 flex flex-col gap-4 border-t-2 border-ink/10 pt-5">
+                {iAmLeading && <Notice tone="success">You&apos;re the highest bidder. Stay ready to defend it.</Notice>}
+                {iHaveBid && !iAmLeading && (
+                  <Notice tone="info">You&apos;ve been outbid. Place a higher bid to get back in front.</Notice>
+                )}
+
+                {authStatus === 'authenticated' && accessToken && user && !isSeller && (
+                  <BidForm
+                    auctionId={auctionId}
+                    currentPriceCents={auction.currentPriceCents}
+                    accessToken={accessToken}
+                  />
+                )}
+                {isSeller && <Notice tone="info">This is your auction, so you can&apos;t bid on it.</Notice>}
+                {authStatus === 'anonymous' && (
+                  <div className="flex flex-col gap-3">
+                    <p className="text-sm text-ink/70">Log in to place a bid on this item.</p>
+                    <ButtonLink href="/login">Log in to bid</ButtonLink>
+                  </div>
+                )}
+                <p className="text-xs text-ink/60">
+                  A valid bid in the last 30 seconds extends the auction by 30 seconds.
+                </p>
+              </div>
+            )}
+
+            {/* Deliberately no direct link to THIS auction's specific order —
+                the auction row has no orderId (ADR-0023 never added one; Order
+                is looked up the other way, by auctionId, only when needed).
+                "Orders" (NavBar) lists every order a participant has. */}
+            {auction.status === 'ENDED' && user && (isSeller || iHaveBid) && (
+              <div className="mt-5 border-t-2 border-ink/10 pt-5">
+                <Notice tone="info">
+                  This auction has ended. Check{' '}
+                  <Link href="/orders" className="font-semibold underline underline-offset-4">
+                    your orders
+                  </Link>{' '}
+                  for the outcome.
+                </Notice>
+              </div>
+            )}
+          </div>
+
+          <section aria-labelledby="bids-heading">
+            <div className="mb-3 flex items-baseline justify-between">
+              <h2 id="bids-heading" className="font-display text-xl font-extrabold">
+                Bid history
+              </h2>
+              <span className="text-sm text-ink/60">
+                {bids.length} {bids.length === 1 ? 'bid' : 'bids'}
+              </span>
+            </div>
+            {bids.length === 0 ? (
+              <p className="rounded-xl border-2 border-dashed border-ink/30 p-4 text-sm text-ink/70">
+                No bids yet. Be the first.
+              </p>
+            ) : (
+              <ul className="overflow-hidden rounded-2xl border-2 border-ink bg-white">
+                {bids.map((bid) => {
+                  const isLeader = bid.id === leadingBid?.id;
+                  const mine = !!user && bid.bidderId === user.id;
+                  return (
+                    <li
+                      key={bid.id}
+                      className={`flex items-center justify-between gap-3 border-b border-ink/10 px-4 py-2.5 text-sm last:border-b-0 ${
+                        isLeader ? 'bg-yellow/30' : ''
+                      }`}
+                    >
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="text-ink/70">{new Date(bid.createdAt).toLocaleString()}</span>
+                        {isLeader && (
+                          <span className="rounded-full border-2 border-ink bg-yellow px-2 py-0 text-[11px] font-bold">
+                            Leading
+                          </span>
+                        )}
+                        {mine && (
+                          <span className="rounded-full border-2 border-ink bg-cyan px-2 py-0 text-[11px] font-bold">
+                            You
+                          </span>
+                        )}
+                      </span>
+                      <span className="font-display font-extrabold">{formatCents(bid.amountCents)}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        </div>
       </div>
-
-      {auction.images.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto">
-          {auction.images.map((url) => (
-            // Storage domain isn't fixed yet (local s3mock vs. prod R2), so
-            // next/image's remotePatterns can't be configured until
-            // deployment — see app/auctions/new/page.tsx's comment.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              key={url}
-              src={url}
-              alt=""
-              className="h-48 w-48 shrink-0 rounded border border-gray-200 object-cover"
-            />
-          ))}
-        </div>
-      )}
-
-      <p className="whitespace-pre-wrap text-gray-700">{auction.description}</p>
-
-      <div className="flex items-baseline justify-between rounded border border-gray-200 p-4">
-        <div>
-          <p className="text-sm text-gray-500">Current price</p>
-          <p className="text-2xl font-bold">{formatCents(auction.currentPriceCents)}</p>
-        </div>
-        <div className="text-right">
-          <p className="text-sm text-gray-500">{auction.status === 'ACTIVE' ? 'Time remaining' : 'Scheduled end'}</p>
-          <p className="font-medium">
-            {auction.status === 'ACTIVE'
-              ? timeRemaining
-              : auction.endTime
-                ? new Date(auction.endTime).toLocaleString()
-                : '—'}
-          </p>
-        </div>
-      </div>
-
-      {auction.status === 'ACTIVE' && (
-        <>
-          {authStatus === 'authenticated' && accessToken && user && user.id !== auction.sellerId && (
-            <BidForm auctionId={auctionId} currentPriceCents={auction.currentPriceCents} accessToken={accessToken} />
-          )}
-          {authStatus === 'authenticated' && user && user.id === auction.sellerId && (
-            <p className="text-sm text-gray-500">You can&apos;t bid on your own auction.</p>
-          )}
-          {authStatus === 'anonymous' && (
-            <p className="text-sm text-gray-500">
-              <Link href="/login" className="underline">
-                Log in
-              </Link>{' '}
-              to place a bid.
-            </p>
-          )}
-        </>
-      )}
-
-      {/* Deliberately no direct link to THIS auction's specific order —
-          the auction row has no orderId (ADR-0023 never added one; Order
-          is looked up the other way, by auctionId, only when needed) and
-          adding that lookup here just to link one row would couple this
-          already-busy page to the Orders domain for a single click-through.
-          "My orders" (NavBar) is one click away and lists every order a
-          participant has, sorted newest first — this just tells a
-          participant to look there. */}
-      {auction.status === 'ENDED' &&
-        user &&
-        (user.id === auction.sellerId || bids.some((bid) => bid.bidderId === user.id)) && (
-          <p className="text-sm text-gray-500">
-            This auction has ended. Check{' '}
-            <Link href="/orders" className="underline">
-              My orders
-            </Link>{' '}
-            for the outcome.
-          </p>
-        )}
-
-      <section>
-        <h2 className="mb-2 text-lg font-medium">Bid history</h2>
-        {bids.length === 0 && <p className="text-sm text-gray-500">No bids yet.</p>}
-        <ul className="flex flex-col gap-1">
-          {bids.map((bid) => (
-            <li key={bid.id} className="flex justify-between text-sm">
-              <span className="text-gray-500">{new Date(bid.createdAt).toLocaleString()}</span>
-              <span className="font-medium">{formatCents(bid.amountCents)}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
     </main>
   );
 }

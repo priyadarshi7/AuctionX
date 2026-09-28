@@ -1,26 +1,84 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --ink: #14141a;
+  --cream: #faf6ec;
+  --cream-2: #f3ecdb;
+  --yellow: #f5c94b;
+  --pink: #ff5c8a;
+  --cyan: #66d9e8;
+  --green: #34c98a;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-ink: var(--ink);
+  --color-cream: var(--cream);
+  --color-cream-2: var(--cream-2);
+  --color-yellow: var(--yellow);
+  --color-pink: var(--pink);
+  --color-cyan: var(--cyan);
+  --color-green: var(--green);
   --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-display: var(--font-display);
+  --font-hand: var(--font-hand);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Subtle graph-paper background used behind hero/section panels — same
+   texture as the reference design's grid-lined canvas, kept faint so it
+   reads as texture, not as an actual layout grid. */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(20, 20, 26, 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(20, 20, 26, 0.06) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.font-display {
+  font-family: var(--font-display), var(--font-sans), sans-serif;
+}
+
+.font-hand {
+  font-family: var(--font-hand), cursive;
+}
+
+/* Flat hard shadow (no blur) — the "sticker" look used on cards, buttons
+   and sticky notes throughout the reference design, instead of a soft
+   drop-shadow. */
+.shadow-hard {
+  box-shadow: 4px 4px 0 0 var(--ink);
+}
+
+.shadow-hard-sm {
+  box-shadow: 2px 2px 0 0 var(--ink);
+}
+
+/* ---- Home page motion ---- */
+
+.reveal { opacity: 0; transform: translateY(16px); transition: opacity 0.5s ease, transform 0.5s ease; }
+.reveal-in { opacity: 1; transform: none; }
+
+@keyframes marquee { to { transform: translateX(-50%); } }
+.marquee-track { animation: marquee 40s linear infinite; }
+.marquee:hover .marquee-track { animation-play-state: paused; }
+
+@keyframes pulse-ring { 0% { transform: scale(1); opacity: 0.6; } 100% { transform: scale(2.6); opacity: 0; } }
+.pulse-ring { animation: pulse-ring 1.8s ease-out infinite; }
+
+@keyframes step-in { from { opacity: 0; transform: translateY(8px); } }
+.step-in { animation: step-in 0.35s ease both; }
+
+.faq summary::-webkit-details-marker { display: none; }
+.faq[open] .faq-icon { transform: rotate(45deg); }
+.faq-icon { transition: transform 0.2s ease; }
+
+/* Keyboard focus: solid ink ring, visible on cream, white, yellow and pink. */
+:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .marquee-track, .pulse-ring, .step-in, .faq-icon { animation: none; transition: none; }
 }

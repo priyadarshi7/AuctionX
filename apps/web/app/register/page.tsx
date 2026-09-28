@@ -9,6 +9,10 @@ import { ApiError } from '@/lib/apiClient';
 import { loginRequest, registerRequest } from '@/lib/auth';
 import { registerSchema, type RegisterFormValues } from '@/lib/validation/auth';
 import { useAuthStore } from '@/store/authStore';
+import { AuthShell, PasswordField } from '../components/ui/AuthShell';
+import { Button } from '../components/ui/Button';
+import { TextField } from '../components/ui/Field';
+import { Notice } from '../components/ui/Notice';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -39,63 +43,53 @@ export default function RegisterPage() {
   };
 
   return (
-    <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-4 p-6">
-      <h1 className="text-2xl font-semibold">Create an account</h1>
-      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-3">
-        <div>
-          <label htmlFor="name" className="block text-sm font-medium text-gray-700">
-            Name
-          </label>
-          <input
-            id="name"
-            type="text"
-            autoComplete="name"
-            {...register('name')}
-            className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
-          />
-          {errors.name && <p className="mt-1 text-sm text-red-600">{errors.name.message}</p>}
-        </div>
-        <div>
-          <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-            Email
-          </label>
-          <input
-            id="email"
-            type="email"
-            autoComplete="email"
-            {...register('email')}
-            className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
-          />
-          {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>}
-        </div>
-        <div>
-          <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-            Password
-          </label>
-          <input
-            id="password"
-            type="password"
-            autoComplete="new-password"
-            {...register('password')}
-            className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
-          />
-          {errors.password && <p className="mt-1 text-sm text-red-600">{errors.password.message}</p>}
-        </div>
-        {serverError && <p className="text-sm text-red-600">{serverError}</p>}
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="rounded bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
+    <AuthShell
+      title="Create your account"
+      subtitle="It takes about a minute. Then you can bid and sell."
+      footer={
+        <>
+          Already have an account?{' '}
+          <Link href="/login" className="font-semibold text-ink underline underline-offset-4">
+            Log in
+          </Link>
+        </>
+      }
+      panelTitle="Bid on the stuff everyone wants."
+      panelPoints={[
+        'Every bid is verified by the server',
+        'Anti-sniping keeps closing seconds fair',
+        'One account to buy and to sell',
+      ]}
+    >
+      <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">
+        <TextField
+          id="name"
+          label="Name"
+          autoComplete="name"
+          error={errors.name?.message}
+          {...register('name')}
+        />
+        <TextField
+          id="email"
+          label="Email"
+          type="email"
+          autoComplete="email"
+          error={errors.email?.message}
+          {...register('email')}
+        />
+        <PasswordField
+          id="password"
+          label="Password"
+          autoComplete="new-password"
+          hint="At least 8 characters."
+          error={errors.password?.message}
+          {...register('password')}
+        />
+        {serverError && <Notice tone="error">{serverError}</Notice>}
+        <Button type="submit" disabled={isSubmitting} className="mt-1 w-full">
           {isSubmitting ? 'Creating account…' : 'Create account'}
-        </button>
+        </Button>
       </form>
-      <p className="text-sm text-gray-600">
-        Already have an account?{' '}
-        <Link href="/login" className="underline">
-          Log in
-        </Link>
-      </p>
-    </main>
+    </AuthShell>
   );
 }

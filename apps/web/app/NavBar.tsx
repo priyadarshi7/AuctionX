@@ -1,9 +1,26 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { logoutRequest } from '@/lib/auth';
 import { useAuthStore } from '@/store/authStore';
 import { NotificationBell } from './NotificationBell';
+
+function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
+  const pathname = usePathname();
+  const active = pathname === href || (href !== '/' && pathname.startsWith(href));
+
+  return (
+    <Link
+      href={href}
+      className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+        active ? 'bg-cyan text-ink' : 'text-ink/70 hover:bg-cream-2 hover:text-ink'
+      }`}
+    >
+      {children}
+    </Link>
+  );
+}
 
 export function NavBar() {
   const user = useAuthStore((state) => state.user);
@@ -20,46 +37,58 @@ export function NavBar() {
   };
 
   return (
-    <header className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-      <Link href="/" className="text-lg font-semibold">
-        AuctionX
-      </Link>
-      <nav className="flex items-center gap-4 text-sm">
-        <Link href="/auctions" className="hover:text-gray-600">
-          Browse
+    <header className="sticky top-0 z-20 border-b-2 border-ink bg-cream/95 px-4 py-3 backdrop-blur">
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
+        <Link href="/" className="flex items-center gap-2 font-display text-xl font-extrabold tracking-tight">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-ink bg-yellow text-sm">
+            {'\u{1FA99}'}
+          </span>
+          AuctionX
         </Link>
-        {status === 'checking' && <span className="text-gray-400">Checking session…</span>}
-        {status === 'authenticated' && user && (
-          <>
-            <Link href="/auctions/new" className="hover:text-gray-600">
-              Sell an item
-            </Link>
-            <Link href="/my-auctions" className="hover:text-gray-600">
-              My auctions
-            </Link>
-            <Link href="/orders" className="hover:text-gray-600">
-              My orders
-            </Link>
-            <NotificationBell />
-            <span className="text-gray-700">
-              Signed in as <span className="font-medium">{user.name}</span>
-            </span>
-            <button type="button" onClick={handleLogout} className="underline hover:text-gray-600">
-              Log out
-            </button>
-          </>
-        )}
-        {status === 'anonymous' && (
-          <>
-            <Link href="/login" className="underline hover:text-gray-600">
-              Log in
-            </Link>
-            <Link href="/register" className="underline hover:text-gray-600">
-              Register
-            </Link>
-          </>
-        )}
-      </nav>
+
+        <nav className="hidden items-center gap-1 rounded-full border-2 border-ink bg-white px-1.5 py-1.5 sm:flex">
+          <NavLink href="/auctions">Browse</NavLink>
+          {status === 'authenticated' && (
+            <>
+              <NavLink href="/auctions/new">Sell</NavLink>
+              <NavLink href="/my-auctions">My auctions</NavLink>
+              <NavLink href="/orders">Orders</NavLink>
+            </>
+          )}
+        </nav>
+
+        <div className="flex items-center gap-3">
+          {status === 'checking' && <span className="text-sm text-ink/50">Checking session…</span>}
+          {status === 'authenticated' && user && (
+            <>
+              <NotificationBell />
+              <span className="hidden items-center justify-center rounded-full border-2 border-ink bg-pink h-8 w-8 text-xs font-bold sm:flex">
+                {user.name.charAt(0).toUpperCase()}
+              </span>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="rounded-full border-2 border-ink px-3 py-1.5 text-sm font-medium hover:bg-cream-2"
+              >
+                Log out
+              </button>
+            </>
+          )}
+          {status === 'anonymous' && (
+            <>
+              <Link href="/login" className="rounded-full px-3 py-1.5 text-sm font-medium hover:bg-cream-2">
+                Log in
+              </Link>
+              <Link
+                href="/register"
+                className="rounded-full border-2 border-ink bg-yellow px-3 py-1.5 text-sm font-semibold shadow-hard-sm transition-transform hover:-translate-y-0.5"
+              >
+                Register
+              </Link>
+            </>
+          )}
+        </div>
+      </div>
     </header>
   );
 }
