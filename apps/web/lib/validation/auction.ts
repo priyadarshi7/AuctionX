@@ -1,18 +1,27 @@
 import { z } from 'zod';
 import { AUCTION_CATEGORIES, AUCTION_CONDITIONS } from '@/lib/types/auction';
 
-// Prices stay as strings through validation (form inputs are strings, and
-// an empty optional field is '' — fighting z.coerce.number() over that is
-// more friction than it saves). Converted to cents only at the API call
-// boundary (app/auctions/new/page.tsx), mirroring the backend's own
-// integer-cents convention (ADR-0007) without asking the user to think in
-// cents themselves.
-export const createAuctionFormSchema = z
+// Price is deliberately NOT collected here — see app/auctions/new/page.tsx's
+// comment: the seller sees the AI valuation (ADR-0032) before setting a
+// price, on the auction's own DRAFT page, not on this initial form.
+export const createAuctionFormSchema = z.object({
+  title: z.string().trim().min(1, 'Title is required').max(200),
+  description: z.string().trim().min(1, 'Description is required').max(5000),
+  category: z.enum(AUCTION_CATEGORIES),
+  condition: z.enum(AUCTION_CONDITIONS),
+});
+
+export type CreateAuctionFormValues = z.infer<typeof createAuctionFormSchema>;
+
+// Used on the auction's own DRAFT page (app/auctions/[id]/
+// SetPriceAndPublishPanel.tsx), after the seller has had a chance to see
+// the AI valuation. Prices stay as strings through validation (form inputs
+// are strings; converted to cents only at the API call boundary), same
+// convention the old combined create form used. Duration is chosen HERE
+// too, not at draft-creation time — "ends in N hours" should count from the
+// moment the seller actually commits to publishing.
+export const setPriceAndPublishFormSchema = z
   .object({
-    title: z.string().trim().min(1, 'Title is required').max(200),
-    description: z.string().trim().min(1, 'Description is required').max(5000),
-    category: z.enum(AUCTION_CATEGORIES),
-    condition: z.enum(AUCTION_CONDITIONS),
     startingPrice: z
       .string()
       .trim()
@@ -23,11 +32,6 @@ export const createAuctionFormSchema = z
       .trim()
       .refine((value) => value === '' || Number(value) > 0, 'Must be greater than 0')
       .optional(),
-    // Duration, not a raw endTime — publishing computes endTime as
-    // now + duration at submit time (mirroring the backend's own
-    // "startTime defaults to now" reasoning, AUCTION-004) rather than
-    // asking a seller using this simple form to pick an absolute
-    // date/time.
     durationHours: z.enum(['1', '6', '24', '72']),
   })
   // Same rule the backend enforces (AUCTION-002/ADR-0007) restated here for
@@ -41,4 +45,4 @@ export const createAuctionFormSchema = z
     { message: 'Reserve price cannot be less than the starting price', path: ['reservePrice'] },
   );
 
-export type CreateAuctionFormValues = z.infer<typeof createAuctionFormSchema>;
+export type SetPriceAndPublishFormValues = z.infer<typeof setPriceAndPublishFormSchema>;

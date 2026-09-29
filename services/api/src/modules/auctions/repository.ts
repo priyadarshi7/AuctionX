@@ -119,6 +119,17 @@ export async function listAuctions(
 // start/pause/cancel/end equivalents), never through the general content
 // edit path. This is enforced by the type signature itself, not just by
 // what callers happen to pass.
+//
+// currentPriceCents IS included here, unlike the public updateAuctionSchema
+// (modules/auctions/schema.ts), which never accepts it from a client at
+// all — Section 82: never trust a client-controlled price. service.ts's
+// updateExistingAuction is the only caller that ever sets it, and only
+// derived from a genuinely-patched startingPriceCents (see its own
+// comment) — a real bug found live (2026-09-29): editing a DRAFT's
+// startingPriceCents left currentPriceCents pointing at whatever it was
+// created with, which the bid-placement transaction (bids/repository.ts)
+// treats as the real floor to beat — publishing straight after an edit
+// would have let a bid far below the seller's actual intended price win.
 export type AuctionPatch = Partial<{
   title: string;
   description: string;
@@ -126,6 +137,7 @@ export type AuctionPatch = Partial<{
   condition: AuctionCondition;
   images: string[];
   startingPriceCents: number;
+  currentPriceCents: number;
   reservePriceCents: number | null;
   startTime: Date;
   endTime: Date;

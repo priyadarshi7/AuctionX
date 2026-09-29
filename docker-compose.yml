@@ -193,7 +193,7 @@ services:
   # Model weights are NOT bundled in the image (they're gigabytes,
   # downloaded on first use) — after `docker compose up`, run
   # `npm run ai:pull-model --workspace=services/api` once to actually pull
-  # OLLAMA_VALUATION_MODEL (default `moondream`) into this container. The
+  # OLLAMA_VISION_MODEL (default `moondream`) into this container. The
   # app boots fine either way; valuation requests just stay
   # PENDING/FAILED until the model has been pulled.
   #

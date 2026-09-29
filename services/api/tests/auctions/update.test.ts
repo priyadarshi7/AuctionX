@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { createApp } from '../../src/app';
 import { prisma } from '../../src/infrastructure/database/prisma';
@@ -42,6 +43,9 @@ async function createDraftAuction(accessToken: string, overrides: Record<string,
 }
 
 afterAll(async () => {
+  // Bid.auction is onDelete: Restrict (ADR-0007) — the new price-regression
+  // test below places a real bid, so it must be cleared first.
+  await prisma.bid.deleteMany({ where: { auctionId: { in: createdAuctionIds } } });
   await prisma.auction.deleteMany({ where: { id: { in: createdAuctionIds } } });
   await prisma.user.deleteMany({ where: { email: { in: testEmails } } });
   await prisma.$disconnect();
@@ -105,9 +109,16 @@ describe('PATCH /api/v1/auctions/:id', () => {
     expect(res.status).toBe(200);
     expect(res.body.auction.title).toBe('Updated Title');
     expect(res.body.auction.startingPriceCents).toBe(2000);
+    // Regression (found live, 2026-09-29): currentPriceCents must track
+    // startingPriceCents while still DRAFT — a DRAFT can never have a real
+    // bid yet, so "the price to beat" is always exactly the starting
+    // price until the first bid. Left stale, this let a bid far below the
+    // seller's actual intended price win after publish.
+    expect(res.body.auction.currentPriceCents).toBe(2000);
 
     const stored = await prisma.auction.findUniqueOrThrow({ where: { id: auction.id } });
     expect(stored.title).toBe('Updated Title');
+    expect(stored.currentPriceCents).toBe(2000);
   });
 
   it('rejects a patch that would make the reserve lower than the (unchanged) starting price', async () => {
@@ -155,5 +166,44 @@ describe('PATCH /api/v1/auctions/:id', () => {
 
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('AUCTION_NOT_EDITABLE');
+  });
+
+  // Full end-to-end proof of the currentPriceCents regression above, not
+  // just checking the stored column — created because the create-auction
+  // frontend flow now creates a DRAFT with a nominal placeholder price and
+  // edits it to a real one before publishing (app/auctions/[id]/
+  // SetPriceAndPublishPanel.tsx), which is exactly the sequence that
+  // surfaced this bug live: a bid was able to win far below the seller's
+  // real intended price because bid validation trusts currentPriceCents,
+  // not startingPriceCents.
+  it('a bid below the EDITED price is rejected after publish, even though it would have cleared the original placeholder price', async () => {
+    const seller = await registerAndLogin();
+    const bidder = await registerAndLogin();
+    const auction = await createDraftAuction(seller.accessToken, { startingPriceCents: 100 });
+
+    await request(app)
+      .patch(`/api/v1/auctions/${auction.id}`)
+      .set('Authorization', `Bearer ${seller.accessToken}`)
+      .send({ startingPriceCents: 250_000 });
+
+    await request(app)
+      .post(`/api/v1/auctions/${auction.id}/publish`)
+      .set('Authorization', `Bearer ${seller.accessToken}`)
+      .send({ endTime: new Date(Date.now() + 3_600_000).toISOString() });
+    await request(app)
+      .post(`/api/v1/auctions/${auction.id}/start`)
+      .set('Authorization', `Bearer ${seller.accessToken}`);
+
+    const lowBid = await request(app)
+      .post(`/api/v1/auctions/${auction.id}/bids`)
+      .set('Authorization', `Bearer ${bidder.accessToken}`)
+      .send({ amountCents: 150, idempotencyKey: randomUUID() });
+    expect(lowBid.status).toBe(400);
+
+    const realBid = await request(app)
+      .post(`/api/v1/auctions/${auction.id}/bids`)
+      .set('Authorization', `Bearer ${bidder.accessToken}`)
+      .send({ amountCents: 250_001, idempotencyKey: randomUUID() });
+    expect(realBid.status).toBe(201);
   });
 });

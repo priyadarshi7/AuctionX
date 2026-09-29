@@ -8,7 +8,7 @@ export async function getValuationHandler(req: Request, res: Response, next: Nex
       throw new UnauthorizedError('UNAUTHENTICATED');
     }
     const valuation = await getValuation(req.user.id, req.params.auctionId as string);
-    res.status(200).json(valuation);
+    res.status(200).json({ valuation });
   } catch (err) {
     next(err);
   }
@@ -20,7 +20,7 @@ export async function regenerateValuationHandler(req: Request, res: Response, ne
       throw new UnauthorizedError('UNAUTHENTICATED');
     }
     const valuation = await regenerateValuation(req.user.id, req.params.auctionId as string);
-    res.status(202).json(valuation);
+    res.status(202).json({ valuation });
   } catch (err) {
     next(err);
   }

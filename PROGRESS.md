@@ -57,9 +57,15 @@ failure mode: a real bid succeeded instantly with OpenSearch fully
 stopped, and the index self-healed on the next event once it came back.
 **Phase 10 — AI** is now started: item valuation (AI-001, ADR-0032) is
 done — self-hosted Ollama (free/local by explicit developer direction),
-async via the same Outbox/Kafka mechanism as search. The other three
-Section 20-22 AI features (listing assistant, fraud detection,
-recommendations) are not built yet.
+async via the same Outbox/Kafka mechanism as search, with the
+create-auction flow restructured (per real usage feedback) so the
+valuation and real price entry both happen on the auction's own DRAFT
+page, before publish, never after. A listing assistant (Section 23) was
+also built, live-verified, then fully removed (also per direct feedback —
+too slow for this local model) — see ADR-0032's Addendum for the full
+story. Accuracy of the valuation itself is still an open problem
+(ADR-0032, `llava:7b` pulled and ready to try next). Fraud detection and
+recommendations are not built yet.
 
 ## Project location
 
@@ -97,6 +103,54 @@ developer chose to defer the actual shrink (`wsl --shutdown` + admin
 mid-session; still open whenever convenient.
 
 ## Current Task
+
+**TASK AI-002 — Fix the valuation flow and a pricing bug, remove the
+listing assistant, all from direct usage feedback (Phase 10, ADR-0032
+Addendum)** → **complete, not committed yet**. Full story in ADR-0032's
+2026-09-29 Addendum; summary here:
+
+1. **Flow was wrong**: the old create form auto-published, so the seller
+   never saw the valuation before the auction went live. Fixed:
+   `app/auctions/new/page.tsx` no longer collects price at all (creates a
+   DRAFT with a nominal placeholder `startingPriceCents`); a new
+   `app/auctions/[id]/SetPriceAndPublishPanel.tsx` sits next to
+   `ValuationPanel` on the auction's own DRAFT page — real price entry +
+   publish, informed by but never blocked by the valuation (a `FAILED` or
+   `PENDING` valuation never disables publishing). `ValuationPanel` is now
+   gated to `status === 'DRAFT'` — gone once published. `my-auctions`'
+   DRAFT quick-action now links into this same flow instead of publishing
+   inline at a stale price.
+2. **A real, serious bug found while building that fix**: editing a
+   DRAFT's `startingPriceCents` never updated `currentPriceCents` — the
+   actual floor bid validation checks. Confirmed live: PATCH to $2,500
+   left the stored row at `currentPriceCents: 100` (the placeholder); a
+   $1.01 bid would have won a $2,500 item. Almost certainly a pre-existing
+   gap (nothing in the old frontend ever exercised "edit price while still
+   DRAFT"), surfaced for the first time by this task's own flow change.
+   Fixed in `modules/auctions/repository.ts`/`service.ts` — kept in
+   lockstep unconditionally, safe because a DRAFT can never have a real
+   bid yet. New end-to-end regression test in `tests/auctions/
+   update.test.ts` proves it (patch price → publish → start → bid below
+   the new price rejected, bid above accepted) — 180/180 passing.
+3. **The listing assistant (Section 23) was built, live-verified
+   (including finding and fixing a real prompt-echo bug), then removed
+   entirely** per direct feedback that it was too slow — this same small
+   local model's compound ask (title + description + category + missing-
+   info + photo notes, all at once) regularly took over a minute and
+   sometimes failed both the call and its retry. All its files, tests, and
+   ADR-0033 deleted rather than left disabled; the shared `ollamaClient.ts`
+   extraction stayed since `ollamaValuationProvider.ts` still uses it.
+   `OLLAMA_VALUATION_MODEL` stayed renamed to `OLLAMA_VISION_MODEL` (done
+   while the listing assistant still existed, kept since it's still the
+   more accurate name).
+
+Valuation accuracy itself (the other half of the original feedback —
+"$0.12 for LV & Nike Collab Shoes") is still open: confirmed live with a
+control test that the model genuinely reads the input rather than
+returning a canned answer, it just has ~no real pricing knowledge for
+luxury/collectible items. `llava:7b` is pulled and ready to try next,
+deliberately deferred until this flow/bug work landed first, per explicit
+developer sequencing.
 
 **TASK AI-001 — Item valuation via self-hosted Ollama (Phase 10, ADR-0032)**
 → **complete, not committed yet**. Section 20's AI valuation (estimated

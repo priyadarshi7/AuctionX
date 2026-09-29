@@ -15,6 +15,8 @@ import { PageMessage, Skeleton } from '../../components/ui/Page';
 import { AuctionStatusPill } from '../../components/ui/StatusPill';
 import { BidForm } from './BidForm';
 import { Gallery } from './Gallery';
+import { SetPriceAndPublishPanel } from './SetPriceAndPublishPanel';
+import { ValuationPanel } from './ValuationPanel';
 
 const CONDITION_LABEL: Record<string, string> = {
   NEW: 'New',
@@ -119,7 +121,11 @@ export default function AuctionDetailPage() {
               </div>
               <div className="rounded-xl border-2 border-ink bg-white p-3">
                 <dt className="text-ink/60">Starting price</dt>
-                <dd className="font-semibold">{formatCents(auction.startingPriceCents)}</dd>
+                {/* DRAFT's startingPriceCents is a meaningless placeholder
+                    until SetPriceAndPublishPanel sets a real one. */}
+                <dd className="font-semibold">
+                  {auction.status === 'DRAFT' ? 'Not set yet' : formatCents(auction.startingPriceCents)}
+                </dd>
               </div>
             </dl>
           </section>
@@ -138,78 +144,97 @@ export default function AuctionDetailPage() {
             </h1>
           </div>
 
-          <div className="rounded-2xl border-2 border-ink bg-white p-5 shadow-hard">
-            <div className="flex items-end justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-ink/60">
-                  {isActive ? 'Current bid' : 'Final price'}
-                </p>
-                <p className="font-display text-4xl font-extrabold">{formatCents(auction.currentPriceCents)}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-xs font-semibold uppercase tracking-wide text-ink/60">
-                  {isActive ? 'Time left' : 'Scheduled end'}
-                </p>
-                {isActive ? (
-                  <p
-                    className={`mt-1 inline-flex items-center gap-1.5 rounded-full border-2 border-ink px-3 py-1 font-display text-lg font-extrabold tabular-nums ${
-                      urgent ? 'bg-pink' : 'bg-green'
-                    }`}
-                  >
-                    <span className="h-1.5 w-1.5 rounded-full bg-ink" />
-                    {timeRemaining}
+          {/* DRAFT has no real price/schedule yet (startingPriceCents is a
+              placeholder until SetPriceAndPublishPanel sets one) — this
+              whole card is replaced by the valuation + set-price panels
+              below for a DRAFT seller instead of showing meaningless
+              numbers. */}
+          {auction.status !== 'DRAFT' && (
+            <div className="rounded-2xl border-2 border-ink bg-white p-5 shadow-hard">
+              <div className="flex items-end justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink/60">
+                    {isActive ? 'Current bid' : 'Final price'}
                   </p>
-                ) : (
-                  <p className="mt-1 font-semibold">
-                    {auction.endTime ? new Date(auction.endTime).toLocaleString() : '—'}
+                  <p className="font-display text-4xl font-extrabold">{formatCents(auction.currentPriceCents)}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink/60">
+                    {isActive ? 'Time left' : 'Scheduled end'}
                   </p>
-                )}
+                  {isActive ? (
+                    <p
+                      className={`mt-1 inline-flex items-center gap-1.5 rounded-full border-2 border-ink px-3 py-1 font-display text-lg font-extrabold tabular-nums ${
+                        urgent ? 'bg-pink' : 'bg-green'
+                      }`}
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-ink" />
+                      {timeRemaining}
+                    </p>
+                  ) : (
+                    <p className="mt-1 font-semibold">
+                      {auction.endTime ? new Date(auction.endTime).toLocaleString() : '—'}
+                    </p>
+                  )}
+                </div>
               </div>
+
+              {isActive && (
+                <div className="mt-5 flex flex-col gap-4 border-t-2 border-ink/10 pt-5">
+                  {iAmLeading && <Notice tone="success">You&apos;re the highest bidder. Stay ready to defend it.</Notice>}
+                  {iHaveBid && !iAmLeading && (
+                    <Notice tone="info">You&apos;ve been outbid. Place a higher bid to get back in front.</Notice>
+                  )}
+
+                  {authStatus === 'authenticated' && accessToken && user && !isSeller && (
+                    <BidForm
+                      auctionId={auctionId}
+                      currentPriceCents={auction.currentPriceCents}
+                      accessToken={accessToken}
+                    />
+                  )}
+                  {isSeller && <Notice tone="info">This is your auction, so you can&apos;t bid on it.</Notice>}
+                  {authStatus === 'anonymous' && (
+                    <div className="flex flex-col gap-3">
+                      <p className="text-sm text-ink/70">Log in to place a bid on this item.</p>
+                      <ButtonLink href="/login">Log in to bid</ButtonLink>
+                    </div>
+                  )}
+                  <p className="text-xs text-ink/60">
+                    A valid bid in the last 30 seconds extends the auction by 30 seconds.
+                  </p>
+                </div>
+              )}
+
+              {/* Deliberately no direct link to THIS auction's specific order —
+                  the auction row has no orderId (ADR-0023 never added one; Order
+                  is looked up the other way, by auctionId, only when needed).
+                  "Orders" (NavBar) lists every order a participant has. */}
+              {auction.status === 'ENDED' && user && (isSeller || iHaveBid) && (
+                <div className="mt-5 border-t-2 border-ink/10 pt-5">
+                  <Notice tone="info">
+                    This auction has ended. Check{' '}
+                    <Link href="/orders" className="font-semibold underline underline-offset-4">
+                      your orders
+                    </Link>{' '}
+                    for the outcome.
+                  </Notice>
+                </div>
+              )}
             </div>
+          )}
 
-            {isActive && (
-              <div className="mt-5 flex flex-col gap-4 border-t-2 border-ink/10 pt-5">
-                {iAmLeading && <Notice tone="success">You&apos;re the highest bidder. Stay ready to defend it.</Notice>}
-                {iHaveBid && !iAmLeading && (
-                  <Notice tone="info">You&apos;ve been outbid. Place a higher bid to get back in front.</Notice>
-                )}
-
-                {authStatus === 'authenticated' && accessToken && user && !isSeller && (
-                  <BidForm
-                    auctionId={auctionId}
-                    currentPriceCents={auction.currentPriceCents}
-                    accessToken={accessToken}
-                  />
-                )}
-                {isSeller && <Notice tone="info">This is your auction, so you can&apos;t bid on it.</Notice>}
-                {authStatus === 'anonymous' && (
-                  <div className="flex flex-col gap-3">
-                    <p className="text-sm text-ink/70">Log in to place a bid on this item.</p>
-                    <ButtonLink href="/login">Log in to bid</ButtonLink>
-                  </div>
-                )}
-                <p className="text-xs text-ink/60">
-                  A valid bid in the last 30 seconds extends the auction by 30 seconds.
-                </p>
-              </div>
-            )}
-
-            {/* Deliberately no direct link to THIS auction's specific order —
-                the auction row has no orderId (ADR-0023 never added one; Order
-                is looked up the other way, by auctionId, only when needed).
-                "Orders" (NavBar) lists every order a participant has. */}
-            {auction.status === 'ENDED' && user && (isSeller || iHaveBid) && (
-              <div className="mt-5 border-t-2 border-ink/10 pt-5">
-                <Notice tone="info">
-                  This auction has ended. Check{' '}
-                  <Link href="/orders" className="font-semibold underline underline-offset-4">
-                    your orders
-                  </Link>{' '}
-                  for the outcome.
-                </Notice>
-              </div>
-            )}
-          </div>
+          {/* Seller-only, and only while DRAFT (ADR-0032 + real usage
+              feedback): the valuation is meant to inform the price
+              decision, so it must never appear once the auction is
+              already published/live/ended — showing it after the fact
+              would be pointless and was reported as a real UX problem. */}
+          {isSeller && accessToken && auction.status === 'DRAFT' && (
+            <>
+              <ValuationPanel auctionId={auctionId} accessToken={accessToken} />
+              <SetPriceAndPublishPanel auctionId={auctionId} accessToken={accessToken} />
+            </>
+          )}
 
           <section aria-labelledby="bids-heading">
             <div className="mb-3 flex items-baseline justify-between">

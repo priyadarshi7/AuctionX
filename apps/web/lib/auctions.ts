@@ -55,6 +55,23 @@ export function createAuctionRequest(
   return apiFetch<{ auction: Auction }>('/auctions', { method: 'POST', body: payload, accessToken });
 }
 
+export type UpdateAuctionPayload = Partial<{
+  startingPriceCents: number;
+  reservePriceCents: number | null;
+}>;
+
+// Only DRAFT auctions are editable (modules/auctions/service.ts) — used
+// here to set the real price after the seller has seen the AI valuation
+// (app/auctions/[id]/SetPriceAndPublishPanel.tsx), since the create form no
+// longer collects price up front.
+export function updateAuctionRequest(
+  accessToken: string,
+  auctionId: string,
+  payload: UpdateAuctionPayload,
+): Promise<{ auction: Auction }> {
+  return apiFetch<{ auction: Auction }>(`/auctions/${auctionId}`, { method: 'PATCH', body: payload, accessToken });
+}
+
 export function publishAuctionRequest(
   accessToken: string,
   auctionId: string,

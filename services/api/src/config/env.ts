@@ -94,10 +94,13 @@ const envSchema = z.object({
   OLLAMA_URL: z.string().url().default('http://localhost:11434'),
   // A small (~1.6B), CPU-friendly vision-language model — chosen for
   // iteration speed on hardware with no GPU, at a real quality cost (see
-  // ADR-0032): its price estimates are a rough guess, not an appraisal. A
-  // single config value, swappable for a larger local model or a future
-  // cloud provider without touching modules/ai's business logic.
-  OLLAMA_VALUATION_MODEL: z.string().min(1).default('moondream'),
+  // ADR-0032): its outputs are a rough guess, not authoritative. A single
+  // config value, swappable for a larger local model or a future cloud
+  // provider without touching modules/ai's business logic. Named for what
+  // it IS (a vision model), not for its first caller — renamed from
+  // OLLAMA_VALUATION_MODEL (ADR-0032) once the listing assistant (ADR-0033)
+  // became a second feature sharing the exact same model.
+  OLLAMA_VISION_MODEL: z.string().min(1).default('moondream'),
   // CPU inference on a small local model is still seconds-to-tens-of-
   // seconds per call, not milliseconds — generous on purpose, this is a
   // background worker's timeout, never on any user-facing request path.

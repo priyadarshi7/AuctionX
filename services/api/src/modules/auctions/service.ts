@@ -218,7 +218,17 @@ export async function updateExistingAuction(
     ...(patch.category !== undefined ? { category: patch.category } : {}),
     ...(patch.condition !== undefined ? { condition: patch.condition } : {}),
     ...(patch.images !== undefined ? { images: patch.images } : {}),
-    ...(patch.startingPriceCents !== undefined ? { startingPriceCents: patch.startingPriceCents } : {}),
+    // currentPriceCents is kept in lockstep with startingPriceCents here —
+    // a DRAFT can never have a real bid yet (bidding requires ACTIVE), so
+    // "the current price to beat" is ALWAYS exactly the starting price
+    // until the first bid ever lands. Found live (2026-09-29): without
+    // this, editing a DRAFT's price (SetPriceAndPublishPanel, ADR-0032's
+    // create-flow restructure) left currentPriceCents at whatever value
+    // the auction was created with, which is the real number bid
+    // validation checks against — a serious bug, not cosmetic.
+    ...(patch.startingPriceCents !== undefined
+      ? { startingPriceCents: patch.startingPriceCents, currentPriceCents: patch.startingPriceCents }
+      : {}),
     // Cast is safe: the `in` check proves the key was actually sent, so the
     // value is a real number or an explicit null, never `undefined` — the
     // static type just can't express that narrowing on its own.

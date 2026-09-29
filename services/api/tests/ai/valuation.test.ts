@@ -89,8 +89,8 @@ describe('GET /api/v1/auctions/:auctionId/valuation', () => {
       .set('Authorization', `Bearer ${accessToken}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.status).toBe('PENDING');
-    expect(res.body.estimatedValueCents).toBeNull();
+    expect(res.body.valuation.status).toBe('PENDING');
+    expect(res.body.valuation.estimatedValueCents).toBeNull();
   });
 
   it('lazily creates a PENDING valuation for a pre-existing auction with no row yet', async () => {
@@ -106,7 +106,7 @@ describe('GET /api/v1/auctions/:auctionId/valuation', () => {
       .set('Authorization', `Bearer ${accessToken}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.status).toBe('PENDING');
+    expect(res.body.valuation.status).toBe('PENDING');
 
     const stored = await prisma.auctionValuation.findUniqueOrThrow({ where: { auctionId: auction.id } });
     expect(stored.status).toBe('PENDING');
@@ -156,8 +156,8 @@ describe('POST /api/v1/auctions/:auctionId/valuation/regenerate', () => {
       .set('Authorization', `Bearer ${accessToken}`);
 
     expect(res.status).toBe(202);
-    expect(res.body.status).toBe('PENDING');
-    expect(res.body.estimatedValueCents).toBeNull();
-    expect(res.body.explanation).toBeNull();
+    expect(res.body.valuation.status).toBe('PENDING');
+    expect(res.body.valuation.estimatedValueCents).toBeNull();
+    expect(res.body.valuation.explanation).toBeNull();
   });
 });

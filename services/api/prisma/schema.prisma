@@ -230,7 +230,7 @@ model AuctionValuation {
   confidence          Float?
   explanation         String?
   // Which model produced this result (e.g. "moondream") — kept per-row
-  // rather than assumed globally, since OLLAMA_VALUATION_MODEL can change
+  // rather than assumed globally, since OLLAMA_VISION_MODEL can change
   // between when different rows were generated.
   model               String?
   errorMessage        String?

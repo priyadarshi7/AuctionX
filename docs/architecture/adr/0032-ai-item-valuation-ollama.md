@@ -253,3 +253,110 @@ actively work against the seller for no product reason.
   in this project (ADR-0029's same open item) — irrelevant to this
   feature specifically since it deliberately never DLQs, but still an
   open gap for `search-events`/`auction-events`/`notifications` overall.
+
+## Addendum (2026-09-29): real usage feedback — wrong flow, a serious
+## pricing bug, and a related feature tried and removed
+
+Three things came directly from the developer actually using this feature
+after it shipped, not from further design review.
+
+**Problem 1 — the valuation appeared too late to matter.** The original
+create-auction form (`app/auctions/new/page.tsx`) chained
+create → publish → start into one submit, so an auction was already LIVE
+by the time anyone ever saw its valuation on the detail page. Reported
+directly: "the AI valuation should come after I fill up details, before
+publishing — I should be able to set my price on that page." The backend
+design (async, Kafka-triggered, persisted per auction) was correct and
+unchanged; only the frontend sequencing was wrong.
+
+**Fix**: the create form no longer collects a price at all — only title/
+description/category/condition/photos. It creates the `Auction` with a
+nominal placeholder `startingPriceCents` (100, i.e. $1 — never shown,
+always overwritten before publish is possible) purely because the
+database column is a required positive int; nothing about a "price-less"
+create was worth a schema change for this. The seller then lands on the
+auction's own DRAFT page, where a new `SetPriceAndPublishPanel` sits right
+below `ValuationPanel` — real price entry, reserve, duration, and
+"Publish & start" all together, informed by (but never blocked by) the
+valuation shown above it: a `FAILED` or still-`PENDING` valuation never
+disables the price form, exactly as asked ("valuation failure should not
+block me setting up a price and publishing it"). `ValuationPanel` itself
+is now gated to `auction.status === 'DRAFT'` — it disappears entirely once
+published, matching "the AI valuation should not appear after I publish."
+`my-auctions`' own DRAFT quick-action (`AuctionRow.tsx`) was changed from
+an inline "Publish & start" (which would have published at the leftover
+placeholder price) to a link into the same real flow, rather than
+duplicating a second price form.
+
+**Problem 2 — a real, serious pricing bug, found while building the fix
+above, not hypothetically.** `modules/auctions/repository.ts`'s
+`AuctionPatch`/`updateAuctionRow` never touched `currentPriceCents` when
+`startingPriceCents` was edited — a PATCH updated the seller-facing
+`startingPriceCents` field but silently left `currentPriceCents` (the
+actual floor `bids/repository.ts` checks a bid against) pointing at
+whatever the auction was created with. Confirmed live: created a DRAFT at
+the $1 placeholder, PATCHed it to $2,500, published and started it — the
+stored row showed `startingPriceCents: 250000, currentPriceCents: 100`.
+Had this shipped, a bid of $1.01 would have been accepted as the winning
+bid on a $2,500 item. This bug almost certainly pre-dated this session's
+work (the update-a-DRAFT's-price endpoint already existed before AI-001),
+but nothing in the OLD frontend flow ever exercised "edit price while
+still DRAFT" — the new create-then-price-later flow is the first real
+caller of that path, which is what surfaced it.
+
+**Fix**: `AuctionPatch` gained a `currentPriceCents` field (internal to
+the repository layer only — the public `updateAuctionSchema`, Section 82,
+still never accepts it from a client), and
+`modules/auctions/service.ts`'s `updateExistingAuction` sets it in
+lockstep with `startingPriceCents` whenever the latter is patched. Safe
+unconditionally: a DRAFT can never have a real bid yet (bidding requires
+`ACTIVE`), so "the price to beat" is always exactly the starting price
+until first bid, with no ambiguity. Covered by a new end-to-end regression
+test (`tests/auctions/update.test.ts`) that doesn't just check the stored
+column — it patches a DRAFT's price, publishes and starts it for real,
+then proves a bid that would have cleared the OLD placeholder price is
+rejected while one clearing the NEW real price is accepted. 180/180 tests
+passing.
+
+**Problem 3 — the listing assistant (Section 23), built, then removed.**
+Before the flow feedback above, a full second AI feature was built: an
+Ollama-backed "listing assistant" (suggested title/description/category,
+missing-info detection, image-quality notes), synchronous, its own
+`ollamaClient.ts` shared with this file's provider, its own tests, its own
+ADR (0033). It worked mechanically — including finding and fixing a real
+prompt-design bug where the model echoed the prompt's own illustrative
+placeholder text back as its "answer." But live use showed the deeper
+problem Section 23's compound ask (rewrite a title AND a description AND
+classify a category AND enumerate missing facts AND judge photos, all at
+once) is meaningfully harder for this same small local model than
+valuation's single-number-plus-sentence ask: calls regularly took over a
+minute, sometimes exhausted both the model call and its one retry and
+still failed. Reported directly: "the AI suggestion is taking way too
+much time... remove the AI Listing Suggestion." Removed entirely —
+`infrastructure/ai/listingAssistantProvider.ts`/
+`ollamaListingAssistantProvider.ts`, `modules/ai/listingAssistant.*`,
+`listingAssistantRoutes.ts`, their tests, the frontend panel, and
+ADR-0033 itself all deleted rather than left as dead/disabled code. The
+shared `ollamaClient.ts` extraction stayed (still used by this file's own
+`ollamaValuationProvider.ts`) since it has independent value regardless of
+the second caller going away.
+
+`OLLAMA_VALUATION_MODEL` was renamed to `OLLAMA_VISION_MODEL` while the
+listing assistant existed (a second feature using the same config value
+made the old name misleading) — the rename was kept even after removing
+that feature, since "vision model" remains the more accurate name for
+what it configures either way. This ADR's own Revisit Conditions section
+above still says the old name; treat `OLLAMA_VISION_MODEL` as current.
+
+**Status of the actual accuracy problem** (a separate, still-open
+complaint from the same feedback: "$0.12 for LV & Nike Collab Shoes" —
+see the main Revisit Conditions above): confirmed live, with a plastic-
+spoon control test, that the model genuinely reads the input (it gave a
+different, more sane number for the cheap item) rather than returning a
+canned response — it simply has close to no real pricing knowledge for
+luxury/collectible items. `llava:7b` has been pulled and is ready to
+test as the next lever (this ADR's own pre-existing Revisit Conditions
+already named it as the right first move before reaching for a paid
+API), deliberately deferred until this flow work landed first, per
+explicit developer sequencing ("first work on this component, then we
+will enhance the AI to perform well").

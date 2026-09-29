@@ -2,25 +2,32 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { useState, type ReactNode } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { ApiError } from '@/lib/apiClient';
-import { createAuctionRequest, publishAuctionRequest, startAuctionRequest } from '@/lib/auctions';
+import { createAuctionRequest } from '@/lib/auctions';
 import { CATEGORY_DISPLAY } from '@/lib/categoryDisplay';
 import { AUCTION_CATEGORIES, AUCTION_CONDITIONS } from '@/lib/types/auction';
-import { computeEndTime, DURATION_LABELS } from '@/lib/duration';
-import { formatCategory, formatCents } from '@/lib/format';
+import { formatCategory } from '@/lib/format';
 import { isAllowedImageFile, requestPresignedUpload, uploadToPresignedUrl } from '@/lib/uploads';
 import { useRequireAuth } from '@/lib/useRequireAuth';
 import { createAuctionFormSchema, type CreateAuctionFormValues } from '@/lib/validation/auction';
 import { Mascot } from '../../components/Mascot';
 import { Button } from '../../components/ui/Button';
-import { Field, SelectField, TextArea, TextField, inputClass } from '../../components/ui/Field';
+import { SelectField, TextArea, TextField } from '../../components/ui/Field';
 import { Notice } from '../../components/ui/Notice';
 import { PageHeader, PageLoading } from '../../components/ui/Page';
 
 const MAX_IMAGES = 10;
+
+// A placeholder, never shown to anyone and always overwritten before this
+// auction can ever be published — see SetPriceAndPublishPanel
+// (app/auctions/[id]/SetPriceAndPublishPanel.tsx). createAuctionSchema
+// (services/api/src/modules/auctions/schema.ts) requires a positive
+// startingPriceCents at the database level; this form deliberately doesn't
+// ask for one (see the page-level comment below for why), so a nominal
+// value satisfies that constraint without meaning anything.
+const PLACEHOLDER_STARTING_PRICE_CENTS = 100;
 
 function Section({ step, title, children }: { step: number; title: string; children: ReactNode }) {
   return (
@@ -36,15 +43,16 @@ function Section({ step, title, children }: { step: number; title: string; child
   );
 }
 
-// Chains three backend calls (create -> publish -> start) into one submit.
-// The backend deliberately keeps these as separate lifecycle actions
-// (ADR-0009/0010) so a real seller dashboard can offer them independently
-// — but a seller using this simple form almost certainly wants their
-// auction live immediately, not sitting in DRAFT/PUBLISHED limbo.
+// Collects everything EXCEPT price, then creates the DRAFT and hands off to
+// the auction's own page — which shows the AI valuation (ADR-0032) and lets
+// the seller set a real price and publish from there (SetPriceAndPublishPanel).
+// Reported directly from real usage: showing the valuation only after an
+// auction was already live defeated the point of having it — the number is
+// meant to inform the price decision, not arrive after it.
 export default function NewAuctionPage() {
   const router = useRouter();
   const auth = useRequireAuth();
-  const [stageError, setStageError] = useState<{ message: string; draftAuctionId?: string } | null>(null);
+  const [stageError, setStageError] = useState<string | null>(null);
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -57,7 +65,6 @@ export default function NewAuctionPage() {
     formState: { errors, isSubmitting },
   } = useForm<CreateAuctionFormValues>({
     resolver: zodResolver(createAuctionFormSchema),
-    defaultValues: { durationHours: '24' },
   });
 
   const watched = useWatch({ control });
@@ -107,61 +114,33 @@ export default function NewAuctionPage() {
 
   const onSubmit = async (values: CreateAuctionFormValues) => {
     setStageError(null);
-    const startingPriceCents = Math.round(Number(values.startingPrice) * 100);
-    const reservePriceCents =
-      values.reservePrice && values.reservePrice !== '' ? Math.round(Number(values.reservePrice) * 100) : undefined;
-
-    let auctionId: string;
     try {
       const { auction } = await createAuctionRequest(accessToken, {
         title: values.title,
         description: values.description,
         category: values.category,
         condition: values.condition,
-        startingPriceCents,
-        ...(reservePriceCents !== undefined ? { reservePriceCents } : {}),
+        startingPriceCents: PLACEHOLDER_STARTING_PRICE_CENTS,
         ...(imageUrls.length > 0 ? { images: imageUrls } : {}),
       });
-      auctionId = auction.id;
+      // Lands on the detail page as a DRAFT — AI valuation + real price
+      // entry + publish all happen there (SetPriceAndPublishPanel).
+      router.push(`/auctions/${auction.id}`);
     } catch (err) {
-      setStageError({ message: err instanceof ApiError ? err.message : 'Failed to create the auction.' });
-      return;
+      setStageError(err instanceof ApiError ? err.message : 'Failed to create the auction.');
     }
-
-    const endTime = computeEndTime(values.durationHours);
-
-    try {
-      await publishAuctionRequest(accessToken, auctionId, endTime);
-      await startAuctionRequest(accessToken, auctionId);
-    } catch (err) {
-      // The auction row now genuinely exists (as DRAFT or PUBLISHED) even
-      // though this step failed, so say so and link to it rather than
-      // pretend nothing happened; My auctions can finish the job.
-      setStageError({
-        message:
-          err instanceof ApiError
-            ? `Auction created, but could not be published: ${err.message}`
-            : 'Auction created, but could not be published automatically.',
-        draftAuctionId: auctionId,
-      });
-      return;
-    }
-
-    router.push(`/auctions/${auctionId}`);
   };
 
   // Live preview, built from what's typed. Purely presentational; the
   // server validates the real values on submit.
   const previewCategory = watched.category ? CATEGORY_DISPLAY[watched.category] : null;
-  const previewPrice = Number(watched.startingPrice);
-  const previewPriceText =
-    watched.startingPrice && Number.isFinite(previewPrice) && previewPrice >= 0
-      ? formatCents(Math.round(previewPrice * 100))
-      : '$0.00';
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-10">
-      <PageHeader title="Sell an item" subtitle="Fill this in and your auction goes live right away." />
+      <PageHeader
+        title="Sell an item"
+        subtitle="Tell us about the item first — you'll see an AI valuation and set your price on the next step."
+      />
 
       <div className="grid items-start gap-8 lg:grid-cols-[1fr_320px]">
         <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-6">
@@ -274,66 +253,10 @@ export default function NewAuctionPage() {
             )}
           </Section>
 
-          <Section step={3} title="Price and timing">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Starting price ($)" htmlFor="startingPrice" error={errors.startingPrice?.message}>
-                <input
-                  id="startingPrice"
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="0.00"
-                  aria-invalid={errors.startingPrice ? true : undefined}
-                  aria-describedby={errors.startingPrice ? 'startingPrice-error' : undefined}
-                  className={inputClass(!!errors.startingPrice)}
-                  {...register('startingPrice')}
-                />
-              </Field>
-              <Field
-                label="Reserve price ($, optional)"
-                htmlFor="reservePrice"
-                hint="The lowest price you'll accept."
-                error={errors.reservePrice?.message}
-              >
-                <input
-                  id="reservePrice"
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="0.00"
-                  aria-invalid={errors.reservePrice ? true : undefined}
-                  aria-describedby={errors.reservePrice ? 'reservePrice-error' : 'reservePrice-hint'}
-                  className={inputClass(!!errors.reservePrice)}
-                  {...register('reservePrice')}
-                />
-              </Field>
-            </div>
-            <SelectField id="durationHours" label="Duration" {...register('durationHours')}>
-              {Object.entries(DURATION_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </SelectField>
-          </Section>
-
-          {stageError && (
-            <Notice tone="error">
-              <p>{stageError.message}</p>
-              {stageError.draftAuctionId && (
-                <p className="mt-1">
-                  <Link href={`/auctions/${stageError.draftAuctionId}`} className="font-semibold underline underline-offset-4">
-                    View the auction
-                  </Link>{' '}
-                  or{' '}
-                  <Link href="/my-auctions" className="font-semibold underline underline-offset-4">
-                    finish it from My auctions
-                  </Link>
-                </p>
-              )}
-            </Notice>
-          )}
+          {stageError && <Notice tone="error">{stageError}</Notice>}
 
           <Button type="submit" disabled={isSubmitting || uploading} className="w-full sm:w-fit">
-            {isSubmitting ? 'Publishing…' : uploading ? 'Waiting for uploads…' : 'Create and publish'}
+            {isSubmitting ? 'Saving…' : uploading ? 'Waiting for uploads…' : 'Continue to pricing'}
           </Button>
         </form>
 
@@ -357,15 +280,10 @@ export default function NewAuctionPage() {
               <p className="line-clamp-2 min-h-10 font-display text-base font-bold leading-tight">
                 {watched.title || 'Your title appears here'}
               </p>
-              <div>
-                <p className="text-[11px] uppercase tracking-wide text-ink/60">Starting bid</p>
-                <p className="font-display text-lg font-extrabold">{previewPriceText}</p>
-              </div>
             </div>
           </div>
           <p className="mt-3 text-sm text-ink/70">
-            This is how your listing looks in browse. A bid in the last 30 seconds extends the clock, so plan for a
-            fair finish.
+            Next, you&apos;ll see an AI valuation for this item and set your own price before publishing.
           </p>
         </aside>
       </div>

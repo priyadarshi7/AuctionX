@@ -27,7 +27,7 @@ export type ValuationResult = {
   explanation: string;
   // Which concrete model produced this (e.g. "moondream") — stored on the
   // AuctionValuation row itself, not assumed from current config, since
-  // OLLAMA_VALUATION_MODEL can change between when different rows were
+  // OLLAMA_VISION_MODEL can change between when different rows were
   // generated.
   model: string;
 };

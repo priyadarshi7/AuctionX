@@ -4,19 +4,12 @@ import { useMutation } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useState } from 'react';
 import { ApiError } from '@/lib/apiClient';
-import {
-  cancelAuctionRequest,
-  pauseAuctionRequest,
-  publishAuctionRequest,
-  startAuctionRequest,
-} from '@/lib/auctions';
+import { cancelAuctionRequest, pauseAuctionRequest, startAuctionRequest } from '@/lib/auctions';
 import { CATEGORY_DISPLAY } from '@/lib/categoryDisplay';
-import { computeEndTime, DURATION_LABELS } from '@/lib/duration';
 import { formatCents } from '@/lib/format';
 import type { Auction } from '@/lib/types/auction';
 import { Mascot } from '../components/Mascot';
-import { Button } from '../components/ui/Button';
-import { inputClass } from '../components/ui/Field';
+import { Button, ButtonLink } from '../components/ui/Button';
 import { Notice } from '../components/ui/Notice';
 import { AuctionStatusPill } from '../components/ui/StatusPill';
 
@@ -30,22 +23,8 @@ type Props = {
 // parent page tracking a map keyed by auction id — simpler, and each
 // action only ever affects the one auction it's attached to anyway.
 export function AuctionRow({ auction, accessToken, onChanged }: Props) {
-  const [durationHours, setDurationHours] = useState('24');
   const [confirmCancel, setConfirmCancel] = useState(false);
   const display = CATEGORY_DISPLAY[auction.category];
-
-  // publish+start chained here mirrors auctions/new/page.tsx's own create
-  // flow (ADR-0016) — this is exactly the recovery path that ADR documented
-  // as missing: a DRAFT sitting here either never got published at all, or
-  // (more likely) is a fresh auction that hasn't been touched yet.
-  const publishAndStart = useMutation({
-    mutationFn: async () => {
-      const endTime = computeEndTime(durationHours);
-      await publishAuctionRequest(accessToken, auction.id, endTime);
-      await startAuctionRequest(accessToken, auction.id);
-    },
-    onSuccess: onChanged,
-  });
 
   // A PUBLISHED auction already has startTime/endTime stored from a prior
   // publish call (ADR-0009) — start needs no new input, unlike the DRAFT
@@ -68,8 +47,8 @@ export function AuctionRow({ auction, accessToken, onChanged }: Props) {
     },
   });
 
-  const pending = publishAndStart.isPending || start.isPending || pause.isPending || cancel.isPending;
-  const error = publishAndStart.error ?? start.error ?? pause.error ?? cancel.error;
+  const pending = start.isPending || pause.isPending || cancel.isPending;
+  const error = start.error ?? pause.error ?? cancel.error;
   const errorMessage = error instanceof ApiError ? error.message : error ? 'Something went wrong.' : null;
 
   // Cancelling is destructive, so it needs a second, explicit click.
@@ -122,7 +101,11 @@ export function AuctionRow({ auction, accessToken, onChanged }: Props) {
           <p className="text-[11px] uppercase tracking-wide text-ink/60">
             {auction.status === 'ACTIVE' ? 'Current bid' : 'Price'}
           </p>
-          <p className="whitespace-nowrap font-display text-lg font-extrabold">{formatCents(auction.currentPriceCents)}</p>
+          {/* DRAFT's currentPriceCents is a placeholder until the seller
+              sets a real one on the auction's own page — see below. */}
+          <p className="whitespace-nowrap font-display text-lg font-extrabold">
+            {auction.status === 'DRAFT' ? 'Not set yet' : formatCents(auction.currentPriceCents)}
+          </p>
         </div>
       </div>
 
@@ -131,27 +114,17 @@ export function AuctionRow({ auction, accessToken, onChanged }: Props) {
         auction.status === 'ACTIVE' ||
         auction.status === 'PAUSED') && (
         <div className="mt-4 flex flex-wrap items-center gap-2 border-t-2 border-ink/10 pt-4">
+          {/* Routes to the auction's own page rather than publishing
+              inline — the AI valuation (ADR-0032) and real price entry
+              (SetPriceAndPublishPanel) both live there now, since the
+              create form no longer collects a price up front. Publishing
+              from here directly would either need to duplicate that price
+              form or risk publishing at the placeholder price the auction
+              was created with. */}
           {auction.status === 'DRAFT' && (
-            <>
-              <label className="sr-only" htmlFor={`duration-${auction.id}`}>
-                Duration
-              </label>
-              <select
-                id={`duration-${auction.id}`}
-                value={durationHours}
-                onChange={(event) => setDurationHours(event.target.value)}
-                className={`${inputClass(false)} w-auto py-1.5 text-sm`}
-              >
-                {Object.entries(DURATION_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-              <Button size="sm" onClick={() => publishAndStart.mutate()} disabled={pending}>
-                {publishAndStart.isPending ? 'Publishing…' : 'Publish & start'}
-              </Button>
-            </>
+            <ButtonLink href={`/auctions/${auction.id}`} size="sm">
+              Set price &amp; publish
+            </ButtonLink>
           )}
 
           {auction.status === 'PUBLISHED' && (

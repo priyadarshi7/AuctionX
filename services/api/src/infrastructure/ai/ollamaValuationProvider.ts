@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { env } from '../../config/env';
-import { logger } from '../observability/logger';
+import { fetchImagesAsBase64, generateStructuredJson, OllamaCallError } from './ollamaClient';
 import {
   ValuationProviderError,
   type ValuationInput,
@@ -15,7 +15,8 @@ import {
 // for the model to form an opinion without turning one valuation into a
 // multi-minute CPU job.
 const MAX_IMAGES = 3;
-const IMAGE_FETCH_TIMEOUT_MS = 15_000;
+
+const LOG_EVENT = 'ai.valuation';
 
 // The model reasons in whole US dollars, not cents — asking a small local
 // model to correctly produce integer cents directly is asking it to also
@@ -55,71 +56,6 @@ Respond with ONLY a JSON object (no other text) in exactly this shape:
 {"estimatedValueUsd": number, "priceRangeLowUsd": number, "priceRangeHighUsd": number, "confidence": number between 0 and 1, "explanation": "one or two sentences"}`;
 }
 
-async function fetchImageAsBase64(url: string): Promise<string | null> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS);
-    try {
-      const res = await fetch(url, { signal: controller.signal });
-      if (!res.ok) {
-        logger.warn({ url, status: res.status }, 'ai.valuation.image_fetch_failed');
-        return null;
-      }
-      const buffer = Buffer.from(await res.arrayBuffer());
-      return buffer.toString('base64');
-    } finally {
-      clearTimeout(timeout);
-    }
-  } catch (err) {
-    // A dead/unreachable image URL degrades this one image, not the whole
-    // valuation attempt — the model still gets whatever other images
-    // fetched successfully, plus the text fields either way.
-    logger.warn({ err, url }, 'ai.valuation.image_fetch_failed');
-    return null;
-  }
-}
-
-type OllamaGenerateResponse = { response: string };
-
-async function callOllama(prompt: string, images: string[]): Promise<string> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), env.OLLAMA_TIMEOUT_MS);
-  try {
-    const res = await fetch(`${env.OLLAMA_URL}/api/generate`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: env.OLLAMA_VALUATION_MODEL,
-        prompt,
-        ...(images.length > 0 ? { images } : {}),
-        format: 'json',
-        stream: false,
-      }),
-    });
-    if (!res.ok) {
-      throw new ValuationProviderError(`Ollama responded with HTTP ${res.status}`);
-    }
-    const body = (await res.json()) as OllamaGenerateResponse;
-    return body.response;
-  } catch (err) {
-    if (err instanceof ValuationProviderError) throw err;
-    throw new ValuationProviderError(`Ollama request failed: ${err instanceof Error ? err.message : String(err)}`);
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-function parseRawResponse(raw: string): z.infer<typeof rawValuationSchema> | null {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    const result = rawValuationSchema.safeParse(parsed);
-    return result.success ? result.data : null;
-  } catch {
-    return null;
-  }
-}
-
 // Exported purely so tests/ai/ollamaValuationProvider.test.ts can exercise
 // the clamping invariant below directly, without a real Ollama call — same
 // reasoning as middleware/rateLimit.ts exporting bidRateLimitKeyBy.
@@ -153,38 +89,27 @@ export function toResult(raw: z.infer<typeof rawValuationSchema>, model: string)
 
 // Section 20's AI valuation, backed by a self-hosted Ollama model (ADR-0032
 // — chosen for the "prefer free/local" deployment target over a paid cloud
-// vision API). Deliberately just ONE bounded retry on an unparseable
-// response (Section 41 — not an unbounded loop): a stricter one-line
-// reminder is appended and the whole prompt is sent again. If that also
-// fails to parse, this throws ValuationProviderError and lets the caller
-// (modules/ai/consumer.ts) decide what a FAILED valuation looks like —
-// this class has no opinion on persistence.
+// vision API). The actual model call/retry/parse logic lives in
+// ollamaClient.ts, shared with modules/ai's other Ollama-backed feature —
+// this class only owns the valuation-specific prompt, schema, and USD-to-
+// cents/range-clamping conversion.
 export class OllamaValuationProvider implements ValuationProvider {
   readonly name = 'ollama';
 
   async valuate(input: ValuationInput): Promise<ValuationResult> {
     const imageUrls = input.imageUrls.slice(0, MAX_IMAGES);
-    const images = (await Promise.all(imageUrls.map(fetchImageAsBase64))).filter(
-      (img): img is string => img !== null,
-    );
-
+    const images = await fetchImagesAsBase64(imageUrls, LOG_EVENT);
     const prompt = buildPrompt(input, images.length);
 
-    const first = await callOllama(prompt, images);
-    const firstParsed = parseRawResponse(first);
-    if (firstParsed) {
-      return toResult(firstParsed, env.OLLAMA_VALUATION_MODEL);
+    try {
+      const raw = await generateStructuredJson(prompt, images, rawValuationSchema, LOG_EVENT);
+      return toResult(raw, env.OLLAMA_VISION_MODEL);
+    } catch (err) {
+      if (err instanceof OllamaCallError) {
+        throw new ValuationProviderError(err.message);
+      }
+      throw err;
     }
-
-    logger.warn({ model: env.OLLAMA_VALUATION_MODEL }, 'ai.valuation.unparseable_response_retrying');
-    const retryPrompt = `${prompt}\n\nYour previous response was not valid JSON. Respond with ONLY the JSON object, nothing else.`;
-    const second = await callOllama(retryPrompt, images);
-    const secondParsed = parseRawResponse(second);
-    if (secondParsed) {
-      return toResult(secondParsed, env.OLLAMA_VALUATION_MODEL);
-    }
-
-    throw new ValuationProviderError('Model did not return a parseable valuation after one retry');
   }
 }
 
