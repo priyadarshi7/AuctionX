@@ -13,5 +13,15 @@ import { redis } from '../src/infrastructure/redis/client';
 // centralize; Prisma disconnect stays each file's own responsibility,
 // sequenced explicitly after its own cleanup.
 afterAll(async () => {
-  await redis.quit();
+  // redis.quit() waits for a live connection to send QUIT on — if the
+  // client is mid-reconnect (client.ts sets no retryStrategy/
+  // connectTimeout, so a connection hiccup at test startup means ioredis's
+  // default unbounded backoff loop), quit() never resolves and the whole
+  // test run hangs silently with no error, no timeout, nothing (confirmed
+  // live 2026-09-30: 23+ minutes, zero CPU, no output). Racing it against a
+  // short timeout and force-disconnecting either way guarantees teardown
+  // actually finishes — this only affects test teardown, not the
+  // production client's intentionally-unbounded reconnect behavior.
+  await Promise.race([redis.quit(), new Promise((resolve) => setTimeout(resolve, 3000))]);
+  redis.disconnect();
 });
