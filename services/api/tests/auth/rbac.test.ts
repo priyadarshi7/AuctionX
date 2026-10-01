@@ -14,7 +14,7 @@ const testEmails: string[] = [];
 // call within the same run (that's exactly what broke here initially).
 function uniqueEmail(label: string): string {
   counter += 1;
-  const email = `test-rbac-${runId}-${counter}-${label}@example.com`;
+  const email = `test-rbac-${runId}-${counter}-${label}@example.com`.toLowerCase();
   testEmails.push(email);
   return email;
 }

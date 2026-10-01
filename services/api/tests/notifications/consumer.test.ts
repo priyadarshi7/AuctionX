@@ -13,7 +13,7 @@ const createdUserIds: string[] = [];
 
 function uniqueEmail(label: string): string {
   counter += 1;
-  const email = `test-notif-consumer-${runId}-${counter}-${label}@example.com`;
+  const email = `test-notif-consumer-${runId}-${counter}-${label}@example.com`.toLowerCase();
   testEmails.push(email);
   return email;
 }

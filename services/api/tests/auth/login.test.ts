@@ -9,7 +9,7 @@ const runId = Date.now();
 const testEmails: string[] = [];
 
 function uniqueEmail(label: string): string {
-  const email = `test-login-${runId}-${label}@example.com`;
+  const email = `test-login-${runId}-${label}@example.com`.toLowerCase();
   testEmails.push(email);
   return email;
 }

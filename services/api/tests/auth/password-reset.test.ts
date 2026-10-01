@@ -12,7 +12,7 @@ const testEmails: string[] = [];
 
 function uniqueEmail(label: string): string {
   counter += 1;
-  const email = `test-pwreset-${runId}-${counter}-${label}@example.com`;
+  const email = `test-pwreset-${runId}-${counter}-${label}@example.com`.toLowerCase();
   testEmails.push(email);
   return email;
 }
@@ -53,6 +53,9 @@ describe('POST /api/v1/auth/forgot-password', () => {
     await request(app)
       .post('/api/v1/auth/register')
       .send({ email, password: 'correct-horse-battery', name: 'Sends Test' });
+    // registerUser also sends its own (verification) email now — reset so
+    // `sent` below reflects only what THIS test is actually about.
+    fakeEmailSender.reset();
 
     await request(app)
       .post('/api/v1/auth/forgot-password')
@@ -70,6 +73,7 @@ describe('POST /api/v1/auth/forgot-password', () => {
     await request(app)
       .post('/api/v1/auth/register')
       .send({ email, password: 'correct-horse-battery', name: 'Reissue Test' });
+    fakeEmailSender.reset();
 
     await request(app).post('/api/v1/auth/forgot-password').send({ email });
     const firstToken = extractTokenFromLink(fakeEmailSender.sent[0]!.html);
@@ -106,6 +110,7 @@ describe('POST /api/v1/auth/reset-password', () => {
     await request(app)
       .post('/api/v1/auth/register')
       .send({ email, password: oldPassword, name: 'Changes Test' });
+    fakeEmailSender.reset();
 
     await request(app).post('/api/v1/auth/forgot-password').send({ email });
     const token = extractTokenFromLink(fakeEmailSender.sent[0]!.html);
@@ -132,6 +137,7 @@ describe('POST /api/v1/auth/reset-password', () => {
     await request(app)
       .post('/api/v1/auth/register')
       .send({ email, password, name: 'Revoke Test' });
+    fakeEmailSender.reset();
 
     const loginRes = await request(app).post('/api/v1/auth/login').send({ email, password });
     const setCookieHeader = loginRes.headers['set-cookie'];
@@ -157,6 +163,7 @@ describe('POST /api/v1/auth/reset-password', () => {
     await request(app)
       .post('/api/v1/auth/register')
       .send({ email, password: 'correct-horse-battery', name: 'Expired Test' });
+    fakeEmailSender.reset();
 
     await request(app).post('/api/v1/auth/forgot-password').send({ email });
     const token = extractTokenFromLink(fakeEmailSender.sent[0]!.html);
@@ -178,6 +185,7 @@ describe('POST /api/v1/auth/reset-password', () => {
     await request(app)
       .post('/api/v1/auth/register')
       .send({ email, password: 'correct-horse-battery', name: 'Reused Test' });
+    fakeEmailSender.reset();
 
     await request(app).post('/api/v1/auth/forgot-password').send({ email });
     const token = extractTokenFromLink(fakeEmailSender.sent[0]!.html);

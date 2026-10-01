@@ -13,7 +13,7 @@ const createdAuctionIds: string[] = [];
 
 function uniqueEmail(label: string): string {
   counter += 1;
-  const email = `test-anti-sniping-${runId}-${counter}-${label}@example.com`;
+  const email = `test-anti-sniping-${runId}-${counter}-${label}@example.com`.toLowerCase();
   testEmails.push(email);
   return email;
 }
@@ -22,6 +22,7 @@ async function registerAndLogin(label = 'user') {
   const email = uniqueEmail(label);
   const password = 'correct-horse-battery';
   await request(app).post('/api/v1/auth/register').send({ email, password, name: 'Anti Sniping Test' });
+  await prisma.user.update({ where: { email }, data: { emailVerifiedAt: new Date() } });
   const loginRes = await request(app).post('/api/v1/auth/login').send({ email, password });
   return { accessToken: loginRes.body.accessToken as string };
 }
