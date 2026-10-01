@@ -9,6 +9,7 @@ import {
 } from '../../middleware/rateLimit';
 import { validateBody } from '../../middleware/validate';
 import {
+  deleteAccountHandler,
   forgotPassword,
   login,
   logout,
@@ -41,6 +42,10 @@ authRoutes.post('/login', authRateLimit, validateBody(loginSchema), login);
 authRoutes.post('/refresh', authRateLimit, refresh);
 authRoutes.post('/logout', logout);
 authRoutes.get('/me', authenticate, me);
+// No dedicated rate limiter — self-only, destructive-but-rare, same
+// reasoning as PATCH /users/:userId/status below (the global apiRateLimit
+// already applied to /api/v1/* in app.ts is enough).
+authRoutes.delete('/me', authenticate, deleteAccountHandler);
 
 authRoutes.patch(
   '/users/:userId/status',

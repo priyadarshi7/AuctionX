@@ -25,6 +25,13 @@ export function logoutRequest(): Promise<void> {
   return apiFetch<void>('/auth/logout', { method: 'POST' });
 }
 
+// Mirrors services/api's deleteOwnAccount (modules/auth/service.ts) — only
+// succeeds for a completely clean account (no auctions/bids/orders ever),
+// and rejects with ACCOUNT_HAS_HISTORY (409) otherwise.
+export function deleteAccountRequest(accessToken: string): Promise<void> {
+  return apiFetch<void>('/auth/me', { method: 'DELETE', accessToken });
+}
+
 export function verifyEmailRequest(token: string): Promise<{ message: string }> {
   return apiFetch<{ message: string }>('/auth/verify-email', { method: 'POST', body: { token } });
 }

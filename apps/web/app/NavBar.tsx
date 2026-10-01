@@ -62,9 +62,13 @@ export function NavBar() {
           {status === 'authenticated' && user && (
             <>
               <NotificationBell />
-              <span className="hidden items-center justify-center rounded-full border-2 border-ink bg-pink h-8 w-8 text-xs font-bold sm:flex">
+              <Link
+                href="/account"
+                title="Account"
+                className="hidden items-center justify-center rounded-full border-2 border-ink bg-pink h-8 w-8 text-xs font-bold hover:brightness-95 sm:flex"
+              >
                 {user.name.charAt(0).toUpperCase()}
-              </span>
+              </Link>
               <button
                 type="button"
                 onClick={handleLogout}

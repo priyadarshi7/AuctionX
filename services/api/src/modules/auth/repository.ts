@@ -27,6 +27,43 @@ export function updateUserStatus(userId: string, status: UserStatus): Promise<Us
   return prisma.user.update({ where: { id: userId }, data: { status } });
 }
 
+export type UserHistoryCounts = { bidsPlaced: number; bidsReceived: number; orders: number };
+
+// Deliberately NOT "does this user own any Auction row at all" — a DRAFT
+// (never published) or CANCELLED (possibly cancelled before ever
+// receiving a bid) auction has no other user's data entangled with it, so
+// owning one is not real history worth blocking on. What actually matters
+// is whether a Bid or Order exists anywhere connected to this user: a bid
+// THEY placed on someone else's auction (bidsPlaced), a bid SOMEONE ELSE
+// placed on an auction they own (bidsReceived — Bid's own schema comment:
+// "append-only: never updated, never deleted"), or an Order on either
+// side. Only those three make this account's history load-bearing for
+// someone else's data.
+export async function getUserHistoryCounts(userId: string): Promise<UserHistoryCounts> {
+  const [bidsPlaced, bidsReceived, orders] = await Promise.all([
+    prisma.bid.count({ where: { bidderId: userId } }),
+    prisma.bid.count({ where: { auction: { sellerId: userId } } }),
+    prisma.order.count({ where: { OR: [{ sellerId: userId }, { buyerId: userId }] } }),
+  ]);
+  return { bidsPlaced, bidsReceived, orders };
+}
+
+// Only ever called after getUserHistoryCounts confirms no bid/order ever
+// touched this account — which means every Auction this user owns
+// (whatever its status) is guaranteed to have zero bids against it too
+// (a bid existing would have shown up as bidsReceived), so it's safe to
+// delete them in the SAME transaction as the user row, rather than
+// leaving them behind to trip Auction.seller's onDelete: Restrict.
+// AuctionValuation cascades from Auction; RefreshToken/
+// PasswordResetToken/EmailVerificationToken/Notification all cascade from
+// User — nothing else needs explicit cleanup here.
+export async function deleteUserAndOwnedAuctions(userId: string): Promise<void> {
+  await prisma.$transaction([
+    prisma.auction.deleteMany({ where: { sellerId: userId } }),
+    prisma.user.delete({ where: { id: userId } }),
+  ]);
+}
+
 export type NewRefreshToken = {
   userId: string;
   familyId: string;

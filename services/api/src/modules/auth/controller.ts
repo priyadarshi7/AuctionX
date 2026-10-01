@@ -3,6 +3,7 @@ import { env } from '../../config/env';
 import { ACCESS_TOKEN_TTL_SECONDS } from '../../infrastructure/security/tokens';
 import { UnauthorizedError } from '../../middleware/errors';
 import {
+  deleteOwnAccount,
   getCurrentUser,
   loginUser,
   logoutUser,
@@ -126,6 +127,26 @@ export async function me(req: Request, res: Response, next: NextFunction): Promi
     }
     const user = await getCurrentUser(req.user.id);
     res.status(200).json({ user });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function deleteAccountHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    if (!req.user) {
+      throw new UnauthorizedError('UNAUTHENTICATED');
+    }
+    await deleteOwnAccount(req.user.id);
+    // Same reasoning as logout: whatever refresh cookie the client is
+    // holding is for an account that no longer exists, so there's nothing
+    // left for it to be useful for.
+    clearRefreshCookie(res);
+    res.status(204).send();
   } catch (err) {
     next(err);
   }

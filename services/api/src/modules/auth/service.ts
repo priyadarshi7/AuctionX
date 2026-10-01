@@ -23,11 +23,13 @@ import {
   createPasswordResetToken,
   createRefreshToken,
   createUser,
+  deleteUserAndOwnedAuctions,
   findEmailVerificationTokenByHash,
   findPasswordResetTokenByHash,
   findRefreshTokenByHash,
   findUserByEmail,
   findUserById,
+  getUserHistoryCounts,
   invalidateUserResetTokens,
   invalidateUserVerificationTokens,
   revokeRefreshToken,
@@ -187,6 +189,33 @@ export async function getCurrentUser(userId: string): Promise<PublicUser> {
     throw new NotFoundError('User no longer exists');
   }
   return toPublicUser(user);
+}
+
+// Hard delete, allowed only when no bid or order was ever placed by this
+// user OR against an auction they own (see getUserHistoryCounts) — NOT
+// gated on whether they own any Auction row at all, since a DRAFT or a
+// cancelled-before-any-bid auction has nothing else depending on it. When
+// clean, deleteUserAndOwnedAuctions removes the user's own auctions (every
+// one of them guaranteed bid-free by the check above) in the same
+// transaction as the user row, so Auction.seller's onDelete: Restrict
+// (ADR-0007) never gets a chance to block it.
+// A real deployment with actual transaction history would need account
+// anonymization instead of deletion for GDPR-style "right to be forgotten"
+// — out of scope here (Section 2's "Users" module was deliberately skipped
+// for this project), so for now this only serves the actual real case:
+// deleting a throwaway/test account, or one whose only auctions never
+// attracted a single bid.
+export async function deleteOwnAccount(userId: string): Promise<void> {
+  const { bidsPlaced, bidsReceived, orders } = await getUserHistoryCounts(userId);
+  if (bidsPlaced > 0 || bidsReceived > 0 || orders > 0) {
+    throw new ConflictError(
+      'ACCOUNT_HAS_HISTORY',
+      'Your account has bid or order history and cannot be deleted. ' +
+        'Placed bids, bids received on your auctions, and orders are kept as ' +
+        'permanent records and can never be removed.',
+    );
+  }
+  await deleteUserAndOwnedAuctions(userId);
 }
 
 export async function setUserStatus(userId: string, status: UserStatus): Promise<PublicUser> {

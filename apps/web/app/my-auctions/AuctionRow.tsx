@@ -51,12 +51,20 @@ export function AuctionRow({ auction, accessToken, onChanged }: Props) {
   const error = start.error ?? pause.error ?? cancel.error;
   const errorMessage = error instanceof ApiError ? error.message : error ? 'Something went wrong.' : null;
 
-  // Cancelling is destructive, so it needs a second, explicit click.
+  // Cancelling is destructive, so it needs a second, explicit click. A
+  // DRAFT auction is never actually "running" — it hits the exact same
+  // cancel endpoint (DRAFT is in CANCELLABLE_STATUSES specifically so a
+  // never-published listing can be gotten rid of, ADR-0007: auctions are
+  // never hard-deleted), but "Delete" reads more honestly than "Cancel"
+  // for something that was never live.
+  const isDraft = auction.status === 'DRAFT';
   const cancelControl = confirmCancel ? (
     <span className="flex items-center gap-2">
-      <span className="text-sm font-semibold">Cancel this auction?</span>
+      <span className="text-sm font-semibold">
+        {isDraft ? 'Delete this draft?' : 'Cancel this auction?'}
+      </span>
       <Button variant="danger" size="sm" onClick={() => cancel.mutate()} disabled={pending}>
-        {cancel.isPending ? 'Cancelling…' : 'Yes, cancel'}
+        {cancel.isPending ? (isDraft ? 'Deleting…' : 'Cancelling…') : isDraft ? 'Yes, delete' : 'Yes, cancel'}
       </Button>
       <Button variant="ghost" size="sm" onClick={() => setConfirmCancel(false)} disabled={pending}>
         Keep it
@@ -64,16 +72,16 @@ export function AuctionRow({ auction, accessToken, onChanged }: Props) {
     </span>
   ) : (
     <Button variant="danger" size="sm" onClick={() => setConfirmCancel(true)} disabled={pending}>
-      Cancel
+      {isDraft ? 'Delete' : 'Cancel'}
     </Button>
   );
 
   return (
-    <li className="rounded-2xl border-2 border-ink bg-white p-4 shadow-hard-sm">
+    <li className="rounded-2xl border-2 border-line bg-white p-4 shadow-hard-sm">
       <div className="flex items-center gap-4">
         <Link
           href={`/auctions/${auction.id}`}
-          className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border-2 border-ink bg-cream-2"
+          className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border-2 border-line bg-cream-2"
           aria-hidden
           tabIndex={-1}
         >
@@ -113,7 +121,7 @@ export function AuctionRow({ auction, accessToken, onChanged }: Props) {
         auction.status === 'PUBLISHED' ||
         auction.status === 'ACTIVE' ||
         auction.status === 'PAUSED') && (
-        <div className="mt-4 flex flex-wrap items-center gap-2 border-t-2 border-ink/10 pt-4">
+        <div className="mt-4 flex flex-wrap items-center gap-2 border-t-2 border-line/10 pt-4">
           {/* Routes to the auction's own page rather than publishing
               inline — the AI valuation (ADR-0032) and real price entry
               (SetPriceAndPublishPanel) both live there now, since the
@@ -122,9 +130,12 @@ export function AuctionRow({ auction, accessToken, onChanged }: Props) {
               form or risk publishing at the placeholder price the auction
               was created with. */}
           {auction.status === 'DRAFT' && (
-            <ButtonLink href={`/auctions/${auction.id}`} size="sm">
-              Set price &amp; publish
-            </ButtonLink>
+            <>
+              <ButtonLink href={`/auctions/${auction.id}`} size="sm">
+                Set price &amp; publish
+              </ButtonLink>
+              {cancelControl}
+            </>
           )}
 
           {auction.status === 'PUBLISHED' && (
