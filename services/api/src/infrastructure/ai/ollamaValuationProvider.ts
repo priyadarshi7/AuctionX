@@ -31,13 +31,53 @@ const LOG_EVENT = 'ai.valuation';
 // throw away an otherwise perfectly usable numeric result over a small
 // model's known weakness at open-ended text generation specifically — see
 // toResult's fallback below for what a blank explanation becomes.
-const rawValuationSchema = z.object({
+// Confirmed live (2026-09-30): moondream reliably produces syntactically
+// valid JSON with sane values, but doesn't reliably keep the "Usd" suffix
+// the prompt asks for — it as often returns estimatedValue/priceRangeLow/
+// priceRangeHigh instead. Without this normalization, every one of those
+// responses failed BOTH the first attempt and the one retry (the retry
+// prompt's "your previous response was not valid JSON" is also just wrong
+// in this case — the JSON was valid, the keys were the mismatch), so a
+// real, usable valuation was being thrown away as "unparseable" every
+// time. Same accommodate-the-small-model-in-code philosophy as the blank
+// `explanation` fallback and the range-widening below, applied one layer
+// earlier, before schema validation instead of after.
+type RawValuation = {
+  estimatedValueUsd: number;
+  priceRangeLowUsd: number;
+  priceRangeHighUsd: number;
+  confidence: number;
+  explanation: string;
+};
+
+// Exported so tests/ai/ollamaValuationProvider.test.ts can lock in the
+// field-name normalization against the exact shape reproduced live, the
+// same reasoning as toCents/toResult being exported below.
+//
+// Explicitly typed as z.ZodType<RawValuation> — without this annotation, TS
+// can't unify ollamaClient.ts's generateStructuredJson<T>(..., schema:
+// z.ZodType<T>, ...) against the ZodEffects type z.preprocess actually
+// returns, and infers T as `unknown` at the call site below (confirmed
+// live: `tsc` failed on `toResult(raw, ...)` with exactly that error).
+// Pinning the declared type here, once, fixes inference everywhere this
+// schema is used instead of pushing a cast onto every call site.
+export const rawValuationSchema: z.ZodType<RawValuation> = z.preprocess((value) => {
+  if (typeof value !== 'object' || value === null) return value;
+  const obj = value as Record<string, unknown>;
+  return {
+    estimatedValueUsd: obj.estimatedValueUsd ?? obj.estimatedValue,
+    priceRangeLowUsd: obj.priceRangeLowUsd ?? obj.priceRangeLow,
+    priceRangeHighUsd: obj.priceRangeHighUsd ?? obj.priceRangeHigh,
+    confidence: obj.confidence,
+    explanation: obj.explanation,
+  };
+}, z.object({
   estimatedValueUsd: z.number().nonnegative(),
   priceRangeLowUsd: z.number().nonnegative(),
   priceRangeHighUsd: z.number().nonnegative(),
   confidence: z.number().min(0).max(1),
   explanation: z.string(),
-});
+}));
 
 function buildPrompt(input: ValuationInput, imageCount: number): string {
   const imageNote =
