@@ -5,6 +5,7 @@ import { emailSender } from '../../infrastructure/email/sender';
 import { logger } from '../../infrastructure/observability/logger';
 import { hashPassword, verifyPassword } from '../../infrastructure/security/password';
 import {
+  EMAIL_VERIFICATION_TOKEN_TTL_MS,
   PASSWORD_RESET_TOKEN_TTL_MS,
   REFRESH_TOKEN_TTL_MS,
   generateOpaqueToken,
@@ -15,16 +16,20 @@ import {
 } from '../../infrastructure/security/tokens';
 import { ConflictError, NotFoundError, UnauthorizedError } from '../../middleware/errors';
 import {
+  completeEmailVerification,
   completePasswordReset,
   consumeRefreshToken,
+  createEmailVerificationToken,
   createPasswordResetToken,
   createRefreshToken,
   createUser,
+  findEmailVerificationTokenByHash,
   findPasswordResetTokenByHash,
   findRefreshTokenByHash,
   findUserByEmail,
   findUserById,
   invalidateUserResetTokens,
+  invalidateUserVerificationTokens,
   revokeRefreshToken,
   updateUserStatus,
 } from './repository';
@@ -36,6 +41,7 @@ export type PublicUser = {
   name: string;
   role: Role;
   status: UserStatus;
+  emailVerifiedAt: Date | null;
   createdAt: Date;
 };
 
@@ -57,8 +63,36 @@ function toPublicUser(user: User): PublicUser {
     name: user.name,
     role: user.role,
     status: user.status,
+    emailVerifiedAt: user.emailVerifiedAt,
     createdAt: user.createdAt,
   };
+}
+
+// Shared by registerUser and resendVerificationEmail — invalidates any
+// still-outstanding token first (same "only the most recent request is
+// valid" reasoning as requestPasswordReset), then issues and emails a new
+// one. Email-send failure is logged, not thrown: same reasoning as
+// requestPasswordReset — this must never be why registration itself fails,
+// and the resend endpoint exists precisely so a failed/lost email is
+// recoverable without becoming a support request.
+async function sendVerificationEmail(user: User): Promise<void> {
+  await invalidateUserVerificationTokens(user.id);
+
+  const { token, hash } = generateOpaqueToken();
+  const expiresAt = new Date(Date.now() + EMAIL_VERIFICATION_TOKEN_TTL_MS);
+  await createEmailVerificationToken({ userId: user.id, tokenHash: hash, expiresAt });
+
+  const verifyLink = `${env.FRONTEND_URL}/verify-email?token=${token}`;
+
+  try {
+    await emailSender.send({
+      to: user.email,
+      subject: 'Verify your AuctionX email',
+      html: `<p>Welcome to AuctionX! Verify your email to sell items and place bids:</p><p><a href="${verifyLink}">${verifyLink}</a></p><p>This link expires in 24 hours. You can already browse and log in without verifying — this is only needed before you sell or bid.</p>`,
+    });
+  } catch (err) {
+    logger.error({ err, userId: user.id }, 'Failed to send verification email');
+  }
 }
 
 export async function registerUser(input: RegisterInput): Promise<PublicUser> {
@@ -66,6 +100,12 @@ export async function registerUser(input: RegisterInput): Promise<PublicUser> {
 
   try {
     const user = await createUser({ email: input.email, passwordHash, name: input.name });
+    // Fire-and-forget from the caller's perspective is wrong here — but
+    // awaiting it inline is right precisely BECAUSE sendVerificationEmail
+    // itself never throws past its own try/catch (Section 24: this must
+    // stay off nothing more than this one request, not become an
+    // unhandled-rejection risk by being left un-awaited).
+    await sendVerificationEmail(user);
     return toPublicUser(user);
   } catch (err) {
     // P2002 = Prisma's unique constraint violation. We deliberately did NOT
@@ -285,4 +325,36 @@ export async function resetPassword(token: string, newPassword: string): Promise
     userId: resetToken.userId,
     newPasswordHash,
   });
+}
+
+export async function verifyEmail(token: string): Promise<void> {
+  const hash = hashOpaqueToken(token);
+  const verificationToken = await findEmailVerificationTokenByHash(hash);
+
+  if (!verificationToken || verificationToken.usedAt || verificationToken.expiresAt < new Date()) {
+    throw new UnauthorizedError(
+      'INVALID_VERIFICATION_TOKEN',
+      'This verification link is invalid or has expired',
+    );
+  }
+
+  await completeEmailVerification({
+    verificationTokenId: verificationToken.id,
+    userId: verificationToken.userId,
+  });
+}
+
+// Authenticated (routes.ts), unlike requestPasswordReset — there's no
+// enumeration concern to hide behind a generic response here: the caller
+// already proved who they are via their access token, so "already
+// verified" / "sent" can just be the honest answer.
+export async function resendVerificationEmail(userId: string): Promise<void> {
+  const user = await findUserById(userId);
+  if (!user) {
+    throw new NotFoundError('User no longer exists');
+  }
+  if (user.emailVerifiedAt) {
+    throw new ConflictError('EMAIL_ALREADY_VERIFIED', 'This email is already verified');
+  }
+  await sendVerificationEmail(user);
 }

@@ -14,6 +14,10 @@ export const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 // mailboxes, a device left unlocked) — 30 minutes bounds it tightly since
 // there's no legitimate reason a reset flow takes longer than that.
 export const PASSWORD_RESET_TOKEN_TTL_MS = 30 * 60 * 1000;
+// Much longer than a password reset — proving "I can read this inbox" is
+// low-stakes compared to proving "I want to change this account's
+// password," and people routinely don't check email right away.
+export const EMAIL_VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 
 export type AccessTokenPayload = {
   sub: string;

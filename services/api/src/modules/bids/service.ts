@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { notifyAuctionChanged } from '../../infrastructure/realtime/auctionEvents';
 import { logger } from '../../infrastructure/observability/logger';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../middleware/errors';
+import { findUserById } from '../auth/repository';
 import { getAuctionForViewer, type RequestingUser } from '../auctions/service';
 import {
   findBidByIdempotencyKey,
@@ -74,6 +75,17 @@ export async function placeBid(
   const existing = await findBidByIdempotencyKey(bidderId, input.idempotencyKey);
   if (existing) {
     return { bid: existing, extended: false };
+  }
+
+  // Soft email-verification gate (same reasoning/precedent as
+  // auctions/service.ts's createNewAuction check) — checked here, BEFORE
+  // placeBidTransactionally acquires the auction row's lock, not inside
+  // assertBidIsAcceptable: this has nothing to do with the auction's state,
+  // so there's no reason to pay for contention on a hot row just to reject
+  // for a reason that was already knowable up front (Section 64).
+  const bidder = await findUserById(bidderId);
+  if (!bidder || !bidder.emailVerifiedAt) {
+    throw new ForbiddenError('Verify your email before placing a bid', 'EMAIL_NOT_VERIFIED');
   }
 
   try {

@@ -9,8 +9,10 @@ import {
   refreshTokens,
   registerUser,
   requestPasswordReset,
+  resendVerificationEmail,
   resetPassword,
   setUserStatus,
+  verifyEmail,
 } from './service';
 import type {
   ForgotPasswordInput,
@@ -18,6 +20,7 @@ import type {
   RegisterInput,
   ResetPasswordInput,
   UpdateUserStatusInput,
+  VerifyEmailInput,
 } from './schema';
 
 const REFRESH_COOKIE_NAME = 'refreshToken';
@@ -170,6 +173,36 @@ export async function resetPasswordHandler(
     const { token, newPassword } = req.body as ResetPasswordInput;
     await resetPassword(token, newPassword);
     res.status(200).json({ message: 'Password has been reset successfully.' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function verifyEmailHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const { token } = req.body as VerifyEmailInput;
+    await verifyEmail(token);
+    res.status(200).json({ message: 'Email verified successfully.' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function resendVerificationHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    if (!req.user) {
+      throw new UnauthorizedError('UNAUTHENTICATED');
+    }
+    await resendVerificationEmail(req.user.id);
+    res.status(200).json({ message: 'Verification email sent.' });
   } catch (err) {
     next(err);
   }

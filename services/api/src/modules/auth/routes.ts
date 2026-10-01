@@ -5,6 +5,7 @@ import {
   authRateLimit,
   forgotPasswordEmailRateLimit,
   forgotPasswordIpRateLimit,
+  resendVerificationRateLimit,
 } from '../../middleware/rateLimit';
 import { validateBody } from '../../middleware/validate';
 import {
@@ -14,8 +15,10 @@ import {
   me,
   refresh,
   register,
+  resendVerificationHandler,
   resetPasswordHandler,
   updateUserStatus,
+  verifyEmailHandler,
 } from './controller';
 import {
   forgotPasswordSchema,
@@ -23,6 +26,7 @@ import {
   registerSchema,
   resetPasswordSchema,
   updateUserStatusSchema,
+  verifyEmailSchema,
 } from './schema';
 
 export const authRoutes = Router();
@@ -60,4 +64,17 @@ authRoutes.post(
   authRateLimit,
   validateBody(resetPasswordSchema),
   resetPasswordHandler,
+);
+
+authRoutes.post(
+  '/verify-email',
+  authRateLimit,
+  validateBody(verifyEmailSchema),
+  verifyEmailHandler,
+);
+authRoutes.post(
+  '/resend-verification',
+  authenticate,
+  resendVerificationRateLimit,
+  resendVerificationHandler,
 );

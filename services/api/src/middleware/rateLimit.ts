@@ -214,3 +214,17 @@ export const aiRegenerateRateLimit = rateLimit({
   keyBy: (req) => `user:${req.user?.id ?? 'unknown'}`,
 });
 
+// Authenticated, so user-keyed rather than IP-keyed like forgot-password —
+// the caller already proved their identity, the only thing worth bounding
+// is spamming their own inbox (or, at real request volume, the shared
+// Gmail account's ~500/day sending cap — see infrastructure/email/
+// sender.ts).
+const RESEND_VERIFICATION_MAX = 3;
+
+export const resendVerificationRateLimit = rateLimit({
+  windowSeconds: 15 * 60,
+  max: isTestEnv ? TEST_ENV_MAX : RESEND_VERIFICATION_MAX,
+  keyPrefix: 'resend-verification',
+  keyBy: (req) => `user:${req.user?.id ?? 'unknown'}`,
+});
+

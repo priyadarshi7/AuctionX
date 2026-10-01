@@ -2,10 +2,18 @@ import type { Consumer } from 'kafkajs';
 import type { NotificationType } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma';
+import { emailSender } from '../../infrastructure/email/sender';
 import { logger } from '../../infrastructure/observability/logger';
 import { pushNotification } from '../../infrastructure/realtime/notificationEvents';
 import { env } from '../../config/env';
 import { createConsumer, runConsumer, type MessageId } from '../../infrastructure/kafka/consumer';
+
+// Backend only ever needs this for the two transactional emails below — the
+// frontend has its own richer formatCents (apps/web/lib/format.ts) for
+// actual UI display; not worth sharing a package for one line of logic.
+function formatCents(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`;
+}
 
 // A distinct group id in tests — otherwise the test suite's consumer and a
 // live `npm run dev` server's consumer (same Redpanda instance, same
@@ -31,18 +39,39 @@ type NewNotificationFromEvent = {
 // into a P2002 this catches and discards — the same P2002-as-idempotency-
 // signal pattern bids/service.ts and payments/service.ts already use for
 // their own races.
-async function createNotificationIdempotently(messageId: MessageId, data: NewNotificationFromEvent): Promise<void> {
+// Returns whether this call actually inserted a new row (true) vs hit the
+// idempotent-replay path (false) — callers that trigger a side effect
+// beyond the DB/WebSocket, like sending an email below, need to know the
+// difference: email sending isn't naturally idempotent the way the insert
+// itself is, so a Kafka redelivery must not re-send one.
+async function createNotificationIdempotently(messageId: MessageId, data: NewNotificationFromEvent): Promise<boolean> {
   try {
     const notification = await prisma.notification.create({
       data: { ...data, sourceEventId: messageId },
     });
     pushNotification(notification);
+    return true;
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       logger.info({ messageId, userId: data.userId }, 'notification.idempotent_replay');
-      return;
+      return false;
     }
     throw err;
+  }
+}
+
+// Email is a pure enhancement on top of the in-app notification, same
+// Section 24 reasoning as everything else in modules/ai — a failed send
+// must never fail event processing (which would trigger Kafka redelivery,
+// and this consumer has no DLQ handling of its own beyond what
+// infrastructure/kafka/consumer.ts's generic retry gives it) or block the
+// in-app notification (already committed by the time this runs) from
+// existing.
+async function sendTransactionalEmail(to: string, subject: string, html: string): Promise<void> {
+  try {
+    await emailSender.send({ to, subject, html });
+  } catch (err) {
+    logger.error({ err, to }, 'notification.email_send_failed');
   }
 }
 
@@ -113,14 +142,14 @@ export async function handleNotificationEvent(topic: string, _key: string | null
       });
       return;
 
-    case 'auction.sold':
+    case 'auction.sold': {
       // Two notifications from one event — the compound
       // (sourceEventId, userId) unique constraint is exactly what makes
       // this safe: both inserts share a messageId but have different
       // userIds, so neither collides with the other, while a REDELIVERY of
       // this same message collides with both of its own earlier inserts,
       // as intended.
-      await createNotificationIdempotently(messageId, {
+      const buyerNotified = await createNotificationIdempotently(messageId, {
         userId: payload.buyerId,
         type: 'AUCTION_WON',
         auctionId: payload.auctionId,
@@ -134,7 +163,28 @@ export async function handleNotificationEvent(topic: string, _key: string | null
         orderId: payload.orderId,
         data: { amountCents: payload.amountCents },
       });
+
+      // Email only the buyer, and only for a genuinely fresh notification
+      // (buyerNotified false means this is a Kafka redelivery — see
+      // createNotificationIdempotently's doc comment). The seller already
+      // gets their own email below when payment actually succeeds, which is
+      // the moment that matters more for them than the sale itself.
+      if (buyerNotified) {
+        const [buyer, auction] = await Promise.all([
+          prisma.user.findUnique({ where: { id: payload.buyerId }, select: { email: true } }),
+          prisma.auction.findUnique({ where: { id: payload.auctionId }, select: { title: true } }),
+        ]);
+        if (buyer) {
+          const itemLabel = auction ? `"${auction.title}"` : 'your item';
+          await sendTransactionalEmail(
+            buyer.email,
+            "You won an auction on AuctionX!",
+            `<p>Congratulations — you won ${itemLabel} for ${formatCents(payload.amountCents)}.</p><p>Visit <a href="${env.FRONTEND_URL}/orders">your orders</a> to complete payment.</p>`,
+          );
+        }
+      }
       return;
+    }
 
     case 'auction.reserve_not_met':
       await createNotificationIdempotently(messageId, {
@@ -145,15 +195,33 @@ export async function handleNotificationEvent(topic: string, _key: string | null
       });
       return;
 
-    case 'payment.succeeded':
-      await createNotificationIdempotently(messageId, {
+    case 'payment.succeeded': {
+      const sellerNotified = await createNotificationIdempotently(messageId, {
         userId: payload.sellerId,
         orderId: payload.orderId,
         type: 'PAYMENT_RECEIVED',
         ...(payload.auctionId ? { auctionId: payload.auctionId } : {}),
         data: { amountCents: payload.amountCents },
       });
+
+      if (sellerNotified) {
+        const [seller, auction] = await Promise.all([
+          prisma.user.findUnique({ where: { id: payload.sellerId }, select: { email: true } }),
+          payload.auctionId
+            ? prisma.auction.findUnique({ where: { id: payload.auctionId }, select: { title: true } })
+            : Promise.resolve(null),
+        ]);
+        if (seller) {
+          const itemLabel = auction ? `"${auction.title}"` : 'your item';
+          await sendTransactionalEmail(
+            seller.email,
+            'Payment received on AuctionX',
+            `<p>Payment of ${formatCents(payload.amountCents)} for ${itemLabel} has been confirmed.</p><p>Visit <a href="${env.FRONTEND_URL}/orders">your orders</a> for details.</p>`,
+          );
+        }
+      }
       return;
+    }
   }
 }
 

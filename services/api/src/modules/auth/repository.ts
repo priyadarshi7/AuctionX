@@ -203,3 +203,47 @@ export function invalidateUserResetTokens(userId: string) {
     data: { usedAt: new Date() },
   });
 }
+
+export type NewEmailVerificationToken = {
+  userId: string;
+  tokenHash: string;
+  expiresAt: Date;
+};
+
+export function createEmailVerificationToken(data: NewEmailVerificationToken) {
+  return prisma.emailVerificationToken.create({ data });
+}
+
+export function findEmailVerificationTokenByHash(tokenHash: string) {
+  return prisma.emailVerificationToken.findUnique({ where: { tokenHash } });
+}
+
+// Same reasoning as invalidateUserResetTokens: only the most recently sent
+// verification link should ever be valid, so a resend doesn't leave two
+// live tokens outstanding.
+export function invalidateUserVerificationTokens(userId: string) {
+  return prisma.emailVerificationToken.updateMany({
+    where: { userId, usedAt: null },
+    data: { usedAt: new Date() },
+  });
+}
+
+export type CompleteEmailVerificationInput = {
+  verificationTokenId: string;
+  userId: string;
+};
+
+// Mark-token-used + set-emailVerifiedAt as one atomic unit, same "a partial
+// failure here is a real problem" reasoning as completePasswordReset.
+export function completeEmailVerification(input: CompleteEmailVerificationInput) {
+  return prisma.$transaction([
+    prisma.emailVerificationToken.update({
+      where: { id: input.verificationTokenId },
+      data: { usedAt: new Date() },
+    }),
+    prisma.user.update({
+      where: { id: input.userId },
+      data: { emailVerifiedAt: new Date() },
+    }),
+  ]);
+}

@@ -2,6 +2,7 @@ import type { Auction, AuctionStatus, Role } from '@prisma/client';
 import { getCachedAuction, setCachedAuction } from '../../infrastructure/redis/auctionCache';
 import { notifyAuctionChanged } from '../../infrastructure/realtime/auctionEvents';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../middleware/errors';
+import { findUserById } from '../auth/repository';
 import {
   cancelAuctionRow,
   createAuction,
@@ -22,7 +23,22 @@ export type RequestingUser = { id: string; role: Role } | undefined;
 // No PublicAuction mapper here, unlike auth's toPublicUser — an Auction has
 // no secret field to strip. sellerId is a public fact about a listing, not
 // a credential.
-export function createNewAuction(sellerId: string, input: CreateAuctionInput): Promise<Auction> {
+export async function createNewAuction(sellerId: string, input: CreateAuctionInput): Promise<Auction> {
+  // Soft email-verification gate (real product discussion, 2026-09-30):
+  // browsing and logging in never require verification, but selling does.
+  // Checked fresh from the DB, never trusted from the JWT — the access
+  // token only carries {sub, role} (middleware/authenticate.ts) and can
+  // outlive a verification that happened after it was issued, same
+  // "never trust stale claims for security-relevant state" reasoning as
+  // loginUser's user.status check.
+  const seller = await findUserById(sellerId);
+  if (!seller || !seller.emailVerifiedAt) {
+    throw new ForbiddenError(
+      'Verify your email before creating an auction',
+      'EMAIL_NOT_VERIFIED',
+    );
+  }
+
   // status and currentPriceCents are never taken from the client (Section
   // 82) — every auction is born DRAFT regardless of what the request body
   // said, and the current price starts equal to the starting price since no

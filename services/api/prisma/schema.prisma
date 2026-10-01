@@ -29,16 +29,25 @@ model User {
   role         Role       @default(USER)
   status       UserStatus @default(ACTIVE)
 
+  // Nullable timestamp, not a boolean — same "has this happened yet"
+  // convention as RefreshToken.revokedAt / PasswordResetToken.usedAt below.
+  // Null means unverified. A soft gate (ADR pending): registering and
+  // logging in never require this, but creating an auction or placing a bid
+  // does (modules/auctions/service.ts, modules/bids/service.ts) — the two
+  // places trust actually matters, per real product discussion 2026-09-30.
+  emailVerifiedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  refreshTokens       RefreshToken[]
-  passwordResetTokens PasswordResetToken[]
-  auctions            Auction[]
-  bids                Bid[]
-  ordersAsSeller      Order[]              @relation("OrdersAsSeller")
-  ordersAsBuyer       Order[]              @relation("OrdersAsBuyer")
-  notifications       Notification[]
+  refreshTokens           RefreshToken[]
+  passwordResetTokens     PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
+  auctions                Auction[]
+  bids                    Bid[]
+  ordersAsSeller          Order[]                  @relation("OrdersAsSeller")
+  ordersAsBuyer           Order[]                  @relation("OrdersAsBuyer")
+  notifications           Notification[]
 
   @@map("users")
 }
@@ -96,6 +105,26 @@ model PasswordResetToken {
 
   @@index([userId])
   @@map("password_reset_tokens")
+}
+
+// Identical shape to PasswordResetToken, deliberately — same single-use,
+// hash-only-lookup opaque-token pattern (infrastructure/security/tokens.ts's
+// generateOpaqueToken), just a longer TTL (24h vs 30min): a stolen
+// verification link that only proves "this inbox exists" is far lower-
+// stakes than a stolen password-reset link, so there's no reason to force
+// the same tight window.
+model EmailVerificationToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("email_verification_tokens")
 }
 
 enum AuctionStatus {
@@ -507,7 +536,7 @@ model OutboxEvent {
   // before a row is published; a claim older than the worker's lease
   // window is treated as abandoned (the claiming process crashed) and
   // re-claimable by anyone.
-  claimedAt   DateTime?
+  claimedAt DateTime?
 
   // The exact query the publisher worker runs: oldest unclaimed-or-
   // lease-expired unpublished events first, so a long Kafka/Redpanda

@@ -43,8 +43,13 @@ export class UnauthorizedError extends AppError {
 }
 
 export class ForbiddenError extends AppError {
-  constructor(message = 'You do not have permission to perform this action') {
-    super(403, 'FORBIDDEN', message);
+  // code defaults to the generic 'FORBIDDEN' every existing call site
+  // relies on (e.g. bids/service.ts's shill-bid check, where the frontend
+  // just surfaces the message) — an explicit code is only for a caller that
+  // needs the client to branch on it, like EMAIL_NOT_VERIFIED below, where
+  // the frontend shows a "verify your email" CTA instead of a plain error.
+  constructor(message = 'You do not have permission to perform this action', code = 'FORBIDDEN') {
+    super(403, code, message);
   }
 }
 
