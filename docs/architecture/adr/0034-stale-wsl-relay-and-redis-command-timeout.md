@@ -149,3 +149,47 @@ configuration from this project, so there's no gap to close there (Section
 - If a genuinely slow (not dead) Redis call ever legitimately needs more
   than 3s, raise `commandTimeout` rather than removing it — the problem
   being solved here is "hangs forever," not "take some bounded time."
+
+## Addendum (2026-10-01) — the same bug on the S3/upload port, found via a real "I can't upload any image" report
+
+This ADR's own list of hardened URLs (`DATABASE_URL`, `REDIS_URL`,
+`KAFKA_BROKERS`, `OPENSEARCH_URL`, `OLLAMA_URL`) missed one:
+`S3_ENDPOINT`/`S3_PUBLIC_URL_BASE` (`config/env.ts`'s Zod defaults, never
+overridden in `.env`), which went stale on `::1:9090` the same way. This
+one is worse than the others: `S3_ENDPOINT` is baked directly into the
+presigned POST URL that `infrastructure/storage/presign.ts` hands back to
+the BROWSER. The presign call itself is pure cryptographic signing — no
+network round-trip — so it always "succeeds" and returns a confident-
+looking 200 with a `localhost:9090` upload URL inside it. Only the
+browser's own subsequent upload to that URL fails, with no server log at
+all pointing at the cause, since the server was never involved in that
+failure.
+
+Confirmed with the same diagnostic as the rest of this ADR:
+`netstat` showed the identical two-listener split on port 9090
+(`0.0.0.0`/`com.docker.backend` vs `::1`/`wslrelay.exe`); `curl
+localhost:9090` failed instantly, `curl 127.0.0.1:9090` succeeded.
+
+Fixed the same way: both `config/env.ts` defaults changed to `127.0.0.1`,
+and explicit `S3_ENDPOINT`/`S3_PUBLIC_URL_BASE` lines added to `.env` and
+`.env.example` (matching the pattern already used for the other five).
+Verified with a full live round trip against the real running server and
+the real s3mock container — register, presign, actually POST a real PNG
+to the returned `uploadUrl`, then GET it back from `publicUrl` — all 200,
+not just "the response shape looks right."
+
+**Lesson applied immediately, not just written down**: grepped
+`config/env.ts` for every remaining `.default('...localhost` right after
+fixing S3, and found the original pass had only ever touched `.env`/
+`.env.example` for `REDIS_URL`/`KAFKA_BROKERS`/`OPENSEARCH_URL`/
+`OLLAMA_URL` — the Zod schema's own fallback defaults for all four were
+still `localhost`-based, inconsistent with what `.env` was overriding
+them to. Harmless today only because `.env` happened to set all four
+explicitly; a real latent gap for anyone relying on the schema's own
+default (a fresh checkout with no `.env` at all, `NODE_ENV=test` runs
+that don't load the dev `.env`, etc.). Fixed all four in the same pass as
+`S3_ENDPOINT`/`S3_PUBLIC_URL_BASE`, so `config/env.ts`'s own defaults and
+`.env`/`.env.example` now agree everywhere. `FRONTEND_URL` is the one
+remaining `localhost` default, left alone deliberately — it's a link for
+the user's own browser to click from an email, not a connection this
+server initiates, so it was never in scope for this fix.

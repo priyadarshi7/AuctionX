@@ -23,7 +23,12 @@ const envSchema = z.object({
   // preferred that loopback-specific bind over Docker's own wildcard one
   // for the same port. Matches docker-compose.yml's redis service, which
   // maps ITS 6380 host port to the container's normal internal 6379.
-  REDIS_URL: z.string().min(1).default('redis://localhost:6380'),
+  // 127.0.0.1, not localhost (ADR-0034) — a separate, later-discovered WSL2
+  // issue: `localhost` can resolve to a STALE ::1 port-forward left over
+  // from a container restart (vs. ADR-0028's collision with a live,
+  // different service), which accepts the TCP connection then never
+  // relays any protocol data.
+  REDIS_URL: z.string().min(1).default('redis://127.0.0.1:6380'),
   // Optional, same reasoning as REDIS_URL: password reset is a real feature
   // but not existential — auction browsing/bidding must still work with no
   // email provider configured. If unset, the app falls back to logging
@@ -43,7 +48,14 @@ const envSchema = z.object({
   // as REDIS_URL: the app must still boot (auction browsing/bidding must
   // still work) with no real object storage configured; only image upload
   // itself would fail.
-  S3_ENDPOINT: z.string().url().default('http://localhost:9090'),
+  // 127.0.0.1, not localhost (ADR-0034): this URL is also handed straight
+  // to the BROWSER as the presigned POST's form action
+  // (infrastructure/storage/presign.ts) — if a WSL2 port-forward for
+  // localhost:S3_PORT ever goes stale, every image upload fails with no
+  // server-side error at all, since the presign call itself never touches
+  // the network (it's pure signing); only the browser's own upload to the
+  // returned URL fails.
+  S3_ENDPOINT: z.string().url().default('http://127.0.0.1:9090'),
   // R2 has no real AWS regions — 'auto' is R2's own documented convention.
   // s3mock/AWS default to a real region name instead; this default is what
   // the local dev stack actually uses, overridden with 'auto' via a real
@@ -56,7 +68,10 @@ const envSchema = z.object({
   // both to build the URL returned after a presigned upload, and to
   // validate that an auction's `images` array only ever references OUR
   // bucket, never an arbitrary external URL (modules/auctions/schema.ts).
-  S3_PUBLIC_URL_BASE: z.string().url().default('http://localhost:9090/auctionx-media'),
+  // Also 127.0.0.1 (ADR-0034) — this is the base of every uploaded image's
+  // actual <img src>, so a stale relay here means every photo on the site
+  // breaks too, not just new uploads.
+  S3_PUBLIC_URL_BASE: z.string().url().default('http://127.0.0.1:9090/auctionx-media'),
   // Signs/verifies MockPaymentProvider's simulated webhook events (Section
   // 19/83 — no real payment provider account required for local dev). Gets
   // a default, unlike JWT_ACCESS_SECRET, because MockPaymentProvider itself
@@ -70,7 +85,8 @@ const envSchema = z.object({
   // with Kafka/Redpanda unreachable (Section 40) — only the Outbox
   // publisher and the notification consumer are affected, both of which
   // already retry indefinitely rather than crash the process.
-  KAFKA_BROKERS: z.string().min(1).default('localhost:9092'),
+  // 127.0.0.1, not localhost (ADR-0034).
+  KAFKA_BROKERS: z.string().min(1).default('127.0.0.1:9092'),
   // Section 30: register/login/refresh are pre-authentication, so this is
   // keyed by IP alone (middleware/rateLimit.ts's authRateLimit) — every
   // account tested from the same dev machine shares one bucket. Defaults to
@@ -82,7 +98,8 @@ const envSchema = z.object({
   // model, never the source of truth (Postgres stays that) — same
   // "must still boot with this unreachable" reasoning as REDIS_URL/
   // KAFKA_BROKERS, so this gets a default instead of being required.
-  OPENSEARCH_URL: z.string().url().default('http://localhost:9200'),
+  // 127.0.0.1, not localhost (ADR-0034).
+  OPENSEARCH_URL: z.string().url().default('http://127.0.0.1:9200'),
   OPENSEARCH_AUCTIONS_INDEX: z.string().min(1).default('auctions'),
   // Phase 10 (Section 20/22, ADR-0032): self-hosted Ollama, chosen over a
   // paid cloud vision API specifically to keep local dev at $0 and
@@ -91,7 +108,8 @@ const envSchema = z.object({
   // boot with this unreachable" reasoning as OPENSEARCH_URL/KAFKA_BROKERS —
   // valuation is an enhancement (Section 24), never load-bearing for
   // auction creation itself.
-  OLLAMA_URL: z.string().url().default('http://localhost:11434'),
+  // 127.0.0.1, not localhost (ADR-0034).
+  OLLAMA_URL: z.string().url().default('http://127.0.0.1:11434'),
   // A small (~1.6B), CPU-friendly vision-language model — chosen for
   // iteration speed on hardware with no GPU, at a real quality cost (see
   // ADR-0032): its outputs are a rough guess, not authoritative. A single
