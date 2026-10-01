@@ -104,6 +104,84 @@ mid-session; still open whenever convenient.
 
 ## Current Task
 
+**TASK AUTH-008 — Email verification (soft gate) + transactional emails for
+"you won" / "payment received" (ADR-0033)** → **complete, not committed
+yet**. Full story in ADR-0033; summary here. Raised directly by the
+developer, interrupting AI work in progress: "haven't you integrated the
+Mail features? for register, email verification, password reset and other
+things, lets do that." Password reset turned out to already be half-built
+(backend-only, no frontend pages); email verification didn't exist at all.
+
+Two design decisions were made with the developer up front, before any
+code: (1) **soft gate** — register/login/browsing never require
+verification; only creating an auction and placing a bid are blocked for
+an unverified account, each checked freshly via `findUserById` (never the
+JWT's stale claims — the access token only carries `{sub, role}`, and can
+be up to 15 minutes stale); (2) beyond verification itself, also wire real
+email for the two notification events a user most needs off-site: buyer
+"you won" on `auction.sold`, seller "payment received" on
+`payment.succeeded` — piggybacked onto the existing async
+`modules/notifications/consumer.ts` (Section 24: never on the bid/auction
+critical path), not a new Kafka topic or consumer.
+
+**Schema**: `User.emailVerifiedAt DateTime?` + a new
+`EmailVerificationToken` model — an exact structural copy of the existing
+`PasswordResetToken` (same opaque-token/SHA-256-hash pattern,
+`infrastructure/security/tokens.ts`), just a 24h TTL instead of 30min.
+Migration `20260930093545_add_email_verification` applied cleanly (new
+nullable column + new table, no backfill needed).
+
+**Backend**: `registerUser` now sends a verification email;
+`POST /api/v1/auth/verify-email` and `POST /api/v1/auth/resend-verification`
+(rate-limited, 3/15min per user) added. `ForbiddenError` gained an optional
+`code` param (default `'FORBIDDEN'`, every prior call site unaffected) so
+the frontend can distinguish `EMAIL_NOT_VERIFIED` from a generic 403.
+`createNewAuction` and `placeBid` each gained the fresh-DB verification
+check — `placeBid`'s runs BEFORE the row lock, so an unrelated rejection
+doesn't pay for contention on a hot auction row (Section 64).
+`createNotificationIdempotently` now returns whether it inserted a fresh
+row (vs. hit the idempotent-replay path), since sending email as a side
+effect of a Kafka message is NOT naturally idempotent the way the
+`Notification` insert itself is — needed so a redelivery skips the email
+while staying a correct no-op for the row.
+
+**Frontend**: three new pages that didn't exist before — `/verify-email`
+(auto-verifies on mount), `/forgot-password`, `/reset-password` — plus a
+persistent `VerificationBanner` in the root layout (shown whenever
+`user && !user.emailVerifiedAt`) and inline "Resend verification email"
+affordances at the two exact moments the gate can actually be hit (the
+create-auction form, the bid form), not just the passive banner.
+
+**Real bugs found and fixed while wiring up test coverage for this
+(unrelated to the feature's own logic, but surfaced by it)**:
+1. A 23-minute hung Jest run, zero CPU — root cause was `redis.quit()` in
+   `tests/jest.setup.ts`'s `afterAll` blocking forever on ioredis's default
+   unbounded reconnect loop. Fixed with a `Promise.race` + `.disconnect()`
+   fallback in the test teardown only (production client's own reconnect
+   behavior intentionally left untouched).
+2. A real email-case-sensitivity bug: test helpers building emails like
+   `bidderA@example.com` (capital letters) didn't match Zod's
+   `.toLowerCase()`-normalized stored value, breaking any raw
+   `prisma.user.update({ where: { email } })` test-setup lookup. Fixed
+   uniformly across all 19 `uniqueEmail()` test helpers.
+3. `tests/auth/password-reset.test.ts` assumed `fakeEmailSender.sent` only
+   ever held password-reset emails; it now also receives the new
+   registration-verification email. Fixed with explicit
+   `fakeEmailSender.reset()` calls after each test's setup registration.
+
+174 tests total, 160 passing clean in the same run; the other 14 are all in
+`tests/notifications/notifications.test.ts`, a pre-existing (not
+introduced by this task) Kafka-backlog-contention flake under multi-suite
+runs — confirmed separately to pass cleanly in isolation. Not yet verified
+live in a real browser (deferred — Gmail SMTP send was already proven live
+by AUTH-007's password-reset flow; this task reused that exact sender).
+
+**Known, explicitly accepted gap** (ADR-0033's own Revisit Conditions): the
+soft gate is hand-enforced in exactly two places with no shared middleware
+— a third future gated write path has to remember to add its own check.
+
+---
+
 **TASK AI-002 — Fix the valuation flow and a pricing bug, remove the
 listing assistant, all from direct usage feedback (Phase 10, ADR-0032
 Addendum)** → **complete, not committed yet**. Full story in ADR-0032's
