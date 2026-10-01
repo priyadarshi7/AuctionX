@@ -114,14 +114,29 @@ on top of a live deployment, rather than blocking the first deploy on
 those.
 
 Provider plan (Section 83's targets made concrete): Vercel (frontend),
-Render or Fly.io (backend), Neon or Supabase (Postgres), Upstash (Redis
-AND Kafka — Kafka is NOT being skipped, see below), Cloudflare R2
-(storage). OpenSearch and Ollama ARE being skipped for v1 — both were
-deliberately built to degrade gracefully (ADR-0029/ADR-0032), so this
-costs nothing broken. Kafka is the one exception to "skip what has no
-free tier": since ADR-0027, `Notification` rows are created ONLY by the
-Kafka consumer, so no Kafka in production means notifications never fire
-at all, not a graceful degradation — Upstash's Kafka product closes this.
+Render or Fly.io (backend), Neon or Supabase (Postgres), Upstash Redis,
+Redpanda Cloud Serverless (Kafka — NOT skipped, see below; originally
+planned as Upstash Kafka until the developer caught, live, that it's
+deprecated — switched to Redpanda Cloud specifically because it's the
+same tech already running locally), Cloudflare R2 (storage). OpenSearch
+and Ollama ARE being skipped for v1 — both were deliberately built to
+degrade gracefully (ADR-0029/ADR-0032), so this costs nothing broken.
+Kafka is the one exception to "skip what has no free tier": since
+ADR-0027, `Notification` rows are created ONLY by the Kafka consumer, so
+no Kafka in production means notifications never fire at all, not a
+graceful degradation.
+
+**Real credentials now exist and are being verified live as they're
+created** (`services/api/.env.production.local`, gitignored fill-in
+checklist): Upstash Redis confirmed working end-to-end (`PING` ->
+`PONG` against the real instance). The first Supabase `DATABASE_URL`
+pasted in didn't resolve in DNS at all (`ENOTFOUND`) — flagged back to
+the developer to re-copy the exact connection string rather than guessed
+at. Also found while filling in real values, not assumed:
+`infrastructure/kafka/client.ts` has never configured `sasl`/`ssl` at
+all (only ever built against a plaintext local broker) — real, small,
+pending code work needed before Redpanda Cloud will actually authenticate,
+deferred until real credentials exist to verify the wiring against.
 
 New `services/api/Dockerfile` + root `.dockerignore`, built and verified
 live (not just `docker build` exiting 0): ran the actual image with
@@ -146,20 +161,20 @@ Also found, documented, deliberately NOT fixed: the local
 `docker-compose.yml` Redpanda's `--advertise-kafka-addr=localhost:9092`
 only works for a host-native client (today's actual local dev setup,
 `npm run dev`) — the first time anything tried reaching it from INSIDE a
-container, it failed. Doesn't affect production (managed Upstash Kafka,
-not self-hosted Redpanda there) and local dev was never containerized
-anyway, so left alone rather than adding multi-listener Kafka config for
-a need that doesn't exist yet.
+container, it failed. Doesn't affect production (managed Redpanda Cloud,
+not this project's own self-hosted Redpanda container) and local dev was
+never containerized anyway, so left alone rather than adding
+multi-listener Kafka config for a need that doesn't exist yet.
 
-**Next steps, in order**: developer creates the Neon/Upstash/R2/Render/
-Vercel accounts and pastes real env vars into each platform's own
-dashboard (never into chat/committed files — same secret-handling
-precedent as AUTH-007's Gmail App Password); generate a FRESH
-`JWT_ACCESS_SECRET` for production (the local `.env`'s has been visible
-in this session's history, must not be reused live); run
+**Next steps, in order**: developer re-copies the correct Supabase (or
+switches to Neon) connection string; creates Redpanda Cloud Serverless +
+Cloudflare R2 + Render/Fly + Vercel; pastes real env vars into each
+platform's own dashboard once verified (never into chat/committed files
+— same secret-handling precedent as AUTH-007's Gmail App Password); runs
 `npx prisma migrate deploy` against the new Postgres as a release step,
-not baked into the Docker image's own boot. Then: Admin panel + auction
-moderation queue, then real Stripe (test mode) as the agreed next
+not baked into the Docker image's own boot. I still owe the Kafka
+SASL_SSL wiring once Redpanda Cloud credentials exist. Then: Admin panel
++ auction moderation queue, then real Stripe (test mode) as the agreed next
 milestone after going live.
 
 ---

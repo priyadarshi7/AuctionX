@@ -27,7 +27,11 @@ Backend API (services/api) -> Render or Fly.io (verify current free-tier
 PostgreSQL                 -> Neon or Supabase
 Redis                      -> Upstash Redis
 Object storage              -> Cloudflare R2
-Kafka                      -> Upstash Kafka (see "Why" below — NOT skipped)
+Kafka                      -> Redpanda Cloud Serverless (see "Why" below
+                               — NOT skipped; originally planned as
+                               Upstash Kafka, which the developer caught
+                               is now deprecated before any wiring was
+                               done)
 OpenSearch                 -> skipped for v1 (search returns 503
                                SEARCH_UNAVAILABLE, everything else works)
 Ollama                     -> skipped for v1 (valuation stays
@@ -40,8 +44,25 @@ since ADR-0027, `Notification` rows are created ONLY by
 `modules/notifications/consumer.ts` — a Kafka consumer, not a synchronous
 write anymore. No Kafka in production means outbid/won/sold/payment
 notifications never fire at all, not a graceful degradation the way
-search/valuation are. Upstash's Kafka product (same account as the Redis
-one) closes this without self-hosting anything.
+search/valuation are.
+
+**Why Redpanda Cloud Serverless over Confluent Cloud** (the other viable
+free-entry option found): it's the SAME technology already running
+locally (`redpandadata/redpanda` in `docker-compose.yml`) — local and
+production stay on identical Kafka-API-compatible tech end to end, not
+just "both happen to speak the Kafka protocol." Confluent Cloud's $400
+credit + $0-while-idle tier was the runner-up, noted here in case
+Redpanda Cloud's terms ever change.
+
+**A real gap found while filling in real credentials, not assumed**:
+`infrastructure/kafka/client.ts` only ever configured `clientId`/
+`brokers` — no `sasl`/`ssl` options at all, since it was only ever built
+against a plaintext local broker. This means wiring up ANY managed Kafka
+provider (Redpanda Cloud, Confluent, or anything else) needs a real, small
+code change (SASL_SSL auth) before it will actually connect — not just a
+config value paste like Postgres/Redis/R2 are. Deferred until real
+Redpanda Cloud credentials exist to verify the auth wiring against, same
+"verify live, don't assume" discipline as the rest of this deployment.
 
 **New `services/api/Dockerfile`**: multi-stage build. The build context is
 the REPO ROOT, not `services/api` — this is an npm workspaces monorepo
@@ -120,8 +141,9 @@ inside a container.
 works for both a host-native process (today's actual local dev setup) and
 a containerized one at the same time without a proper multi-listener Kafka
 config (more complexity than currently justified). It also doesn't affect
-production at all, since the deployment target is managed Upstash Kafka,
-not self-hosted Redpanda. Noted here so it isn't mistaken for a Dockerfile
+production at all, since the deployment target is managed Redpanda Cloud,
+not this project's own self-hosted Redpanda container. Noted here so it
+isn't mistaken for a Dockerfile
 bug if someone tries `docker compose up` with the API containerized
 locally in the future.
 
