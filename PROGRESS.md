@@ -115,10 +115,14 @@ those.
 
 Provider plan (Section 83's targets made concrete): Vercel (frontend),
 Render or Fly.io (backend), Neon or Supabase (Postgres), Upstash Redis,
-Redpanda Cloud Serverless (Kafka — NOT skipped, see below; originally
-planned as Upstash Kafka until the developer caught, live, that it's
-deprecated — switched to Redpanda Cloud specifically because it's the
-same tech already running locally), Backblaze B2 (storage — originally
+Aiven for Apache Kafka (Kafka — NOT skipped, see below; went through
+THREE providers before landing here: Upstash Kafka, caught live as
+deprecated; then Redpanda Cloud Serverless, caught live as only a
+14/30-day trial credit, not actually free; Aiven's free tier is the one
+confirmed genuinely free indefinitely, no card — 5-topic cap checked
+against this app's real 5 source topics, judged an acceptable risk since
+DLQ-topic-publish failures were already handled gracefully before this),
+Backblaze B2 (storage — originally
 planned as Cloudflare R2, but R2 genuinely requires a credit card to
 activate even for free-tier use, which isn't available; B2 is also
 no-card AND S3-compatible, so it's still the zero-code-change config

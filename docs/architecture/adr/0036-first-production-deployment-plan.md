@@ -29,11 +29,9 @@ Redis                      -> Upstash Redis
 Object storage              -> Backblaze B2 (see "Why" below — NOT R2,
                                which needs a credit card the developer
                                doesn't have)
-Kafka                      -> Redpanda Cloud Serverless (see "Why" below
-                               — NOT skipped; originally planned as
-                               Upstash Kafka, which the developer caught
-                               is now deprecated before any wiring was
-                               done)
+Kafka                      -> Aiven for Apache Kafka (see "Why" below —
+                               NOT skipped; went through two providers
+                               before this one, see history below)
 OpenSearch                 -> skipped for v1 (search returns 503
                                SEARCH_UNAVAILABLE, everything else works)
 Ollama                     -> skipped for v1 (valuation stays
@@ -48,13 +46,38 @@ write anymore. No Kafka in production means outbid/won/sold/payment
 notifications never fire at all, not a graceful degradation the way
 search/valuation are.
 
-**Why Redpanda Cloud Serverless over Confluent Cloud** (the other viable
-free-entry option found): it's the SAME technology already running
-locally (`redpandadata/redpanda` in `docker-compose.yml`) — local and
-production stay on identical Kafka-API-compatible tech end to end, not
-just "both happen to speak the Kafka protocol." Confluent Cloud's $400
-credit + $0-while-idle tier was the runner-up, noted here in case
-Redpanda Cloud's terms ever change.
+**Kafka went through three providers before landing on one that's
+actually free, not two**:
+
+1. Upstash Kafka — the original plan. Deprecated; caught directly by the
+   developer before any wiring was attempted.
+2. Redpanda Cloud Serverless — picked next specifically because it's the
+   SAME technology already running locally (`redpandadata/redpanda` in
+   `docker-compose.yml`), so local and production would've stayed on
+   identical Kafka-API-compatible tech, not just "both speak Kafka."
+   Caught directly, again, before any wiring: it's only a 14-day ($100
+   credit) or 30-day-via-marketplace ($300 credit) trial — a real card is
+   required to keep using it afterward. Not actually free, despite how
+   "free to start" reads in its own marketing.
+3. **Aiven for Apache Kafka — the one that's actually, indefinitely free,
+   no card.** Confirmed directly (not assumed, given the previous two
+   misses): 250 KiB/s throughput, 3-day retention, up to 5 topics, no
+   trial period, no card requirement to create or keep using it.
+
+**The 5-topic cap matters here, checked against this app's real usage**:
+this codebase publishes to exactly 5 source topics (`auction-events`,
+`bid-events`, `payment-events`, `search-events`, `ai-valuation-events`)
+— right at Aiven's free-tier cap, with zero room for the per-topic
+`-dlq` topics `infrastructure/kafka/consumer.ts` can also create on a
+handler failure. Judged an acceptable risk, not a blocker: that same
+file already treats a failed DLQ-topic publish as non-fatal (logged
+only — "the original message was already durably on its source topic...
+nothing is lost, only the DLQ copy didn't get made this time"). Hitting
+the cap just means losing that convenience copy on whichever topic
+fails first, not an outage or data loss — a degradation the code was
+already designed to tolerate, not a new failure mode introduced by this
+choice. Confluent Cloud ($400 credit + $0-while-idle) remains a noted
+fallback if Aiven's terms or this topic-count math ever changes.
 
 **Object storage went through two rounds of real-numbers checking, not
 one assumption**:
@@ -88,11 +111,12 @@ one assumption**:
 `infrastructure/kafka/client.ts` only ever configured `clientId`/
 `brokers` — no `sasl`/`ssl` options at all, since it was only ever built
 against a plaintext local broker. This means wiring up ANY managed Kafka
-provider (Redpanda Cloud, Confluent, or anything else) needs a real, small
-code change (SASL_SSL auth) before it will actually connect — not just a
-config value paste like Postgres/Redis/B2 are. Deferred until real
-Redpanda Cloud credentials exist to verify the auth wiring against, same
-"verify live, don't assume" discipline as the rest of this deployment.
+provider (Aiven, Redpanda Cloud, Confluent, or anything else) needs a
+real, small code change (SASL_SSL auth) before it will actually connect
+— not just a config value paste like Postgres/Redis/B2 are. Deferred
+until real Aiven credentials exist to verify the auth wiring against,
+same "verify live, don't assume" discipline as the rest of this
+deployment.
 
 **New `services/api/Dockerfile`**: multi-stage build. The build context is
 the REPO ROOT, not `services/api` — this is an npm workspaces monorepo
@@ -171,7 +195,7 @@ inside a container.
 works for both a host-native process (today's actual local dev setup) and
 a containerized one at the same time without a proper multi-listener Kafka
 config (more complexity than currently justified). It also doesn't affect
-production at all, since the deployment target is managed Redpanda Cloud,
+production at all, since the deployment target is managed Aiven Kafka,
 not this project's own self-hosted Redpanda container. Noted here so it
 isn't mistaken for a Dockerfile
 bug if someone tries `docker compose up` with the API containerized
