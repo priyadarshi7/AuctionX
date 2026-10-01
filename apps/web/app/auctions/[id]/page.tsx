@@ -34,8 +34,14 @@ export default function AuctionDetailPage() {
   const authStatus = useAuthStore((state) => state.status);
 
   const auctionQuery = useQuery({
-    queryKey: ['auctions', 'detail', auctionId],
-    queryFn: () => getAuctionRequest(auctionId),
+    // accessToken is part of the key, not just an argument: SilentRefresh
+    // (app/providers.tsx) resolves the token asynchronously on mount, racing
+    // with this query. Without the token in the key, a DRAFT auction fetched
+    // before the token arrives would 404 once and never automatically
+    // retry — the key must change from (id, null) to (id, token) for
+    // react-query to treat it as a new query and refetch.
+    queryKey: ['auctions', 'detail', auctionId, accessToken],
+    queryFn: () => getAuctionRequest(auctionId, accessToken),
   });
 
   const bidsQuery = useQuery({
@@ -115,11 +121,11 @@ export default function AuctionDetailPage() {
             </h2>
             <p className="mt-3 whitespace-pre-wrap text-ink/80">{auction.description}</p>
             <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
-              <div className="rounded-xl border-2 border-ink bg-white p-3">
+              <div className="rounded-xl border-2 border-line bg-white p-3">
                 <dt className="text-ink/60">Condition</dt>
                 <dd className="font-semibold">{CONDITION_LABEL[auction.condition] ?? auction.condition}</dd>
               </div>
-              <div className="rounded-xl border-2 border-ink bg-white p-3">
+              <div className="rounded-xl border-2 border-line bg-white p-3">
                 <dt className="text-ink/60">Starting price</dt>
                 {/* DRAFT's startingPriceCents is a meaningless placeholder
                     until SetPriceAndPublishPanel sets a real one. */}
@@ -134,7 +140,7 @@ export default function AuctionDetailPage() {
         <div className="flex flex-col gap-6 lg:sticky lg:top-24">
           <div>
             <div className="mb-3 flex flex-wrap items-center gap-2">
-              <span className="rounded-full border-2 border-ink bg-cream px-2.5 py-0.5 text-xs font-semibold">
+              <span className="rounded-full border-2 border-line bg-cream px-2.5 py-0.5 text-xs font-semibold">
                 {display.emoji} {display.label}
               </span>
               <AuctionStatusPill status={auction.status} />
@@ -150,7 +156,7 @@ export default function AuctionDetailPage() {
               below for a DRAFT seller instead of showing meaningless
               numbers. */}
           {auction.status !== 'DRAFT' && (
-            <div className="rounded-2xl border-2 border-ink bg-white p-5 shadow-hard">
+            <div className="rounded-2xl border-2 border-line bg-white p-5 shadow-hard">
               <div className="flex items-end justify-between gap-4">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-ink/60">
@@ -164,7 +170,7 @@ export default function AuctionDetailPage() {
                   </p>
                   {isActive ? (
                     <p
-                      className={`mt-1 inline-flex items-center gap-1.5 rounded-full border-2 border-ink px-3 py-1 font-display text-lg font-extrabold tabular-nums ${
+                      className={`mt-1 inline-flex items-center gap-1.5 rounded-full border-2 border-line px-3 py-1 font-display text-lg font-extrabold tabular-nums ${
                         urgent ? 'bg-pink' : 'bg-green'
                       }`}
                     >
@@ -180,7 +186,7 @@ export default function AuctionDetailPage() {
               </div>
 
               {isActive && (
-                <div className="mt-5 flex flex-col gap-4 border-t-2 border-ink/10 pt-5">
+                <div className="mt-5 flex flex-col gap-4 border-t-2 border-line/10 pt-5">
                   {iAmLeading && <Notice tone="success">You&apos;re the highest bidder. Stay ready to defend it.</Notice>}
                   {iHaveBid && !iAmLeading && (
                     <Notice tone="info">You&apos;ve been outbid. Place a higher bid to get back in front.</Notice>
@@ -211,7 +217,7 @@ export default function AuctionDetailPage() {
                   is looked up the other way, by auctionId, only when needed).
                   "Orders" (NavBar) lists every order a participant has. */}
               {auction.status === 'ENDED' && user && (isSeller || iHaveBid) && (
-                <div className="mt-5 border-t-2 border-ink/10 pt-5">
+                <div className="mt-5 border-t-2 border-line/10 pt-5">
                   <Notice tone="info">
                     This auction has ended. Check{' '}
                     <Link href="/orders" className="font-semibold underline underline-offset-4">
@@ -246,30 +252,30 @@ export default function AuctionDetailPage() {
               </span>
             </div>
             {bids.length === 0 ? (
-              <p className="rounded-xl border-2 border-dashed border-ink/30 p-4 text-sm text-ink/70">
+              <p className="rounded-xl border-2 border-dashed border-line/30 p-4 text-sm text-ink/70">
                 No bids yet. Be the first.
               </p>
             ) : (
-              <ul className="overflow-hidden rounded-2xl border-2 border-ink bg-white">
+              <ul className="overflow-hidden rounded-2xl border-2 border-line bg-white">
                 {bids.map((bid) => {
                   const isLeader = bid.id === leadingBid?.id;
                   const mine = !!user && bid.bidderId === user.id;
                   return (
                     <li
                       key={bid.id}
-                      className={`flex items-center justify-between gap-3 border-b border-ink/10 px-4 py-2.5 text-sm last:border-b-0 ${
+                      className={`flex items-center justify-between gap-3 border-b border-line/10 px-4 py-2.5 text-sm last:border-b-0 ${
                         isLeader ? 'bg-yellow/30' : ''
                       }`}
                     >
                       <span className="flex flex-wrap items-center gap-2">
                         <span className="text-ink/70">{new Date(bid.createdAt).toLocaleString()}</span>
                         {isLeader && (
-                          <span className="rounded-full border-2 border-ink bg-yellow px-2 py-0 text-[11px] font-bold">
+                          <span className="rounded-full border-2 border-line bg-yellow px-2 py-0 text-[11px] font-bold">
                             Leading
                           </span>
                         )}
                         {mine && (
-                          <span className="rounded-full border-2 border-ink bg-cyan px-2 py-0 text-[11px] font-bold">
+                          <span className="rounded-full border-2 border-line bg-cyan px-2 py-0 text-[11px] font-bold">
                             You
                           </span>
                         )}

@@ -30,8 +30,15 @@ export function listAuctionsRequest(params: {
   });
 }
 
-export function getAuctionRequest(id: string): Promise<{ auction: Auction }> {
-  return apiFetch<{ auction: Auction }>(`/auctions/${id}`);
+// accessToken is optional for the same reason as listAuctionsRequest above —
+// public viewers never pass one. But this page (app/auctions/[id]/page.tsx)
+// is also where a seller lands on their OWN DRAFT right after creating it
+// (ADR-0032's addendum), and a DRAFT is invisible to anyone the backend
+// can't recognize as its owner (modules/auctions/service.ts's
+// canSeeDraftsFor check) — so the seller's own token must be forwarded here,
+// or their freshly-created auction 404s for them too.
+export function getAuctionRequest(id: string, accessToken?: string | null): Promise<{ auction: Auction }> {
+  return apiFetch<{ auction: Auction }>(`/auctions/${id}`, { accessToken });
 }
 
 export function listBidsRequest(auctionId: string, limit = 20): Promise<{ bids: Bid[] }> {
