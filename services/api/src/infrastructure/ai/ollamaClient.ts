@@ -77,7 +77,15 @@ async function generate(prompt: string, images: string[]): Promise<string> {
   }
 }
 
-function tryParse<T>(raw: string, schema: z.ZodType<T>): T | null {
+// z.ZodType<T, z.ZodTypeDef, unknown>, not the simpler z.ZodType<T> (which
+// defaults Input to T): .safeParse always genuinely accepts `unknown` at
+// runtime regardless of a schema's own declared Input type, so Input=T was
+// an artificially narrow constraint that happened to hold for a plain
+// z.object() schema but broke for rawValuationSchema's z.preprocess()
+// (whose real Input is unknown, not RawValuation) — confirmed live: `npm
+// run build` (not just `tsc --noEmit`) hard-failed on exactly this
+// mismatch.
+function tryParse<T>(raw: string, schema: z.ZodType<T, z.ZodTypeDef, unknown>): T | null {
   try {
     const parsed: unknown = JSON.parse(raw);
     const result = schema.safeParse(parsed);
@@ -99,7 +107,7 @@ function tryParse<T>(raw: string, schema: z.ZodType<T>): T | null {
 export async function generateStructuredJson<T>(
   prompt: string,
   images: string[],
-  schema: z.ZodType<T>,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   logEvent: string,
 ): Promise<T> {
   const first = await generate(prompt, images);

@@ -42,26 +42,17 @@ const LOG_EVENT = 'ai.valuation';
 // time. Same accommodate-the-small-model-in-code philosophy as the blank
 // `explanation` fallback and the range-widening below, applied one layer
 // earlier, before schema validation instead of after.
-type RawValuation = {
-  estimatedValueUsd: number;
-  priceRangeLowUsd: number;
-  priceRangeHighUsd: number;
-  confidence: number;
-  explanation: string;
-};
-
+//
 // Exported so tests/ai/ollamaValuationProvider.test.ts can lock in the
 // field-name normalization against the exact shape reproduced live, the
 // same reasoning as toCents/toResult being exported below.
 //
-// Explicitly typed as z.ZodType<RawValuation> — without this annotation, TS
-// can't unify ollamaClient.ts's generateStructuredJson<T>(..., schema:
-// z.ZodType<T>, ...) against the ZodEffects type z.preprocess actually
-// returns, and infers T as `unknown` at the call site below (confirmed
-// live: `tsc` failed on `toResult(raw, ...)` with exactly that error).
-// Pinning the declared type here, once, fixes inference everywhere this
-// schema is used instead of pushing a cast onto every call site.
-export const rawValuationSchema: z.ZodType<RawValuation> = z.preprocess((value) => {
+// No explicit type annotation needed — ollamaClient.ts's
+// generateStructuredJson/tryParse declare their `schema` parameter as
+// z.ZodType<T, z.ZodTypeDef, unknown>, matching what z.preprocess actually
+// produces (Input=unknown, Output=inferred from the z.object() below), so
+// TS infers the right T at the call site on its own.
+export const rawValuationSchema = z.preprocess((value) => {
   if (typeof value !== 'object' || value === null) return value;
   const obj = value as Record<string, unknown>;
   return {

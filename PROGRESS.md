@@ -104,6 +104,66 @@ mid-session; still open whenever convenient.
 
 ## Current Task
 
+**TASK DEPLOY-001 — First production deployment plan + Dockerfile (ADR-0036)**
+→ **prep complete, not yet actually deployed (no accounts created yet)**.
+Raised directly: "lets deploy it... plan it," plus a request for a gap
+list toward a "full fledged" platform (Admin panel, auction moderation,
+real Stripe). Agreed with the developer: deploy the CURRENT feature set
+now, build Admin + real Stripe (test/sandbox mode) as the next milestone
+on top of a live deployment, rather than blocking the first deploy on
+those.
+
+Provider plan (Section 83's targets made concrete): Vercel (frontend),
+Render or Fly.io (backend), Neon or Supabase (Postgres), Upstash (Redis
+AND Kafka — Kafka is NOT being skipped, see below), Cloudflare R2
+(storage). OpenSearch and Ollama ARE being skipped for v1 — both were
+deliberately built to degrade gracefully (ADR-0029/ADR-0032), so this
+costs nothing broken. Kafka is the one exception to "skip what has no
+free tier": since ADR-0027, `Notification` rows are created ONLY by the
+Kafka consumer, so no Kafka in production means notifications never fire
+at all, not a graceful degradation — Upstash's Kafka product closes this.
+
+New `services/api/Dockerfile` + root `.dockerignore`, built and verified
+live (not just `docker build` exiting 0): ran the actual image with
+standard port publishing against the real local Postgres/Redis/s3mock,
+confirmed `/readiness` returns 200 and a bad login correctly returns 401.
+Two real things found and fixed/documented while doing this, not assumed:
+(1) npm workspaces hoists dependencies to the root `node_modules`, not
+`services/api/node_modules` — the runtime image stage has to preserve the
+same root-relative layout as the build stage or Node's module resolution
+breaks; (2) `npm run build` (the actual production build) had been
+silently hard-failing this ENTIRE session on a pre-existing type error in
+`ollamaValuationProvider.ts` that every earlier `tsc --noEmit` check
+missed — different compiler invocation, genuinely different result. Fixed
+properly: `ollamaClient.ts`'s `generateStructuredJson`/`tryParse` now
+declare `schema: z.ZodType<T, z.ZodTypeDef, unknown>` (the actually-correct
+type for validating untrusted external JSON) instead of `z.ZodType<T>`,
+which removed the need for the awkward explicit type annotation on
+`rawValuationSchema` entirely. 17/17 AI tests still passing, lint clean,
+both `tsc --noEmit` and the real `npm run build` now agree.
+
+Also found, documented, deliberately NOT fixed: the local
+`docker-compose.yml` Redpanda's `--advertise-kafka-addr=localhost:9092`
+only works for a host-native client (today's actual local dev setup,
+`npm run dev`) — the first time anything tried reaching it from INSIDE a
+container, it failed. Doesn't affect production (managed Upstash Kafka,
+not self-hosted Redpanda there) and local dev was never containerized
+anyway, so left alone rather than adding multi-listener Kafka config for
+a need that doesn't exist yet.
+
+**Next steps, in order**: developer creates the Neon/Upstash/R2/Render/
+Vercel accounts and pastes real env vars into each platform's own
+dashboard (never into chat/committed files — same secret-handling
+precedent as AUTH-007's Gmail App Password); generate a FRESH
+`JWT_ACCESS_SECRET` for production (the local `.env`'s has been visible
+in this session's history, must not be reused live); run
+`npx prisma migrate deploy` against the new Postgres as a release step,
+not baked into the Docker image's own boot. Then: Admin panel + auction
+moderation queue, then real Stripe (test mode) as the agreed next
+milestone after going live.
+
+---
+
 **TASK AUTH-008 — Email verification (soft gate) + transactional emails for
 "you won" / "payment received" (ADR-0033)** → **complete, not committed
 yet**. Full story in ADR-0033; summary here. Raised directly by the
