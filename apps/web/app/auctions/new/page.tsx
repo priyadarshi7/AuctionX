@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useState, type ReactNode } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { ApiError } from '@/lib/apiClient';
+import { resendVerificationRequest } from '@/lib/auth';
 import { createAuctionRequest } from '@/lib/auctions';
 import { CATEGORY_DISPLAY } from '@/lib/categoryDisplay';
 import { AUCTION_CATEGORIES, AUCTION_CONDITIONS } from '@/lib/types/auction';
@@ -31,9 +32,9 @@ const PLACEHOLDER_STARTING_PRICE_CENTS = 100;
 
 function Section({ step, title, children }: { step: number; title: string; children: ReactNode }) {
   return (
-    <section className="rounded-2xl border-2 border-ink bg-white p-5 shadow-hard-sm sm:p-6">
+    <section className="rounded-2xl border-2 border-line bg-white p-5 shadow-hard-sm sm:p-6">
       <h2 className="mb-4 flex items-center gap-3 font-display text-xl font-extrabold">
-        <span className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-ink bg-cyan text-sm">
+        <span className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-line bg-cyan text-sm">
           {step}
         </span>
         {title}
@@ -53,6 +54,8 @@ export default function NewAuctionPage() {
   const router = useRouter();
   const auth = useRequireAuth();
   const [stageError, setStageError] = useState<string | null>(null);
+  const [needsVerification, setNeedsVerification] = useState(false);
+  const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent'>('idle');
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -114,6 +117,8 @@ export default function NewAuctionPage() {
 
   const onSubmit = async (values: CreateAuctionFormValues) => {
     setStageError(null);
+    setNeedsVerification(false);
+    setResendState('idle');
     try {
       const { auction } = await createAuctionRequest(accessToken, {
         title: values.title,
@@ -128,6 +133,17 @@ export default function NewAuctionPage() {
       router.push(`/auctions/${auction.id}`);
     } catch (err) {
       setStageError(err instanceof ApiError ? err.message : 'Failed to create the auction.');
+      setNeedsVerification(err instanceof ApiError && err.code === 'EMAIL_NOT_VERIFIED');
+    }
+  };
+
+  const handleResend = async () => {
+    setResendState('sending');
+    try {
+      await resendVerificationRequest(accessToken);
+      setResendState('sent');
+    } catch {
+      setResendState('idle');
     }
   };
 
@@ -192,7 +208,7 @@ export default function NewAuctionPage() {
                   setDragging(false);
                   void handleFilesSelected(event.dataTransfer.files);
                 }}
-                className={`flex cursor-pointer flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-ink px-4 py-8 text-center transition-colors ${
+                className={`flex cursor-pointer flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-line px-4 py-8 text-center transition-colors ${
                   dragging ? 'bg-yellow' : 'bg-cream hover:bg-cream-2'
                 } ${uploading || imageUrls.length >= MAX_IMAGES ? 'pointer-events-none opacity-60' : ''}`}
               >
@@ -233,9 +249,9 @@ export default function NewAuctionPage() {
                         s3mock, prod: R2), whose domain isn't fixed yet — using
                         next/image here would require remotePatterns config for
                         a domain that doesn't exist until deployment. */}
-                    <img src={url} alt={`Photo ${i + 1}`} className="h-full w-full rounded-xl border-2 border-ink object-cover" />
+                    <img src={url} alt={`Photo ${i + 1}`} className="h-full w-full rounded-xl border-2 border-line object-cover" />
                     {i === 0 && (
-                      <span className="absolute bottom-1 left-1 rounded-full border-2 border-ink bg-yellow px-1.5 text-[10px] font-bold">
+                      <span className="absolute bottom-1 left-1 rounded-full border-2 border-line bg-yellow px-1.5 text-[10px] font-bold">
                         Cover
                       </span>
                     )}
@@ -243,7 +259,7 @@ export default function NewAuctionPage() {
                       type="button"
                       onClick={() => removeImage(url)}
                       aria-label={`Remove photo ${i + 1}`}
-                      className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full border-2 border-ink bg-white text-sm font-bold leading-none hover:bg-pink"
+                      className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full border-2 border-line bg-white text-sm font-bold leading-none hover:bg-pink"
                     >
                       &times;
                     </button>
@@ -253,7 +269,28 @@ export default function NewAuctionPage() {
             )}
           </Section>
 
-          {stageError && <Notice tone="error">{stageError}</Notice>}
+          {stageError && (
+            <Notice tone="error">
+              <p>{stageError}</p>
+              {needsVerification && (
+                <div className="mt-2">
+                  {resendState === 'sent' ? (
+                    <span className="text-sm font-semibold">Check your inbox — a new link is on its way.</span>
+                  ) : (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      disabled={resendState === 'sending'}
+                      onClick={handleResend}
+                    >
+                      {resendState === 'sending' ? 'Sending…' : 'Resend verification email'}
+                    </Button>
+                  )}
+                </div>
+              )}
+            </Notice>
+          )}
 
           <Button type="submit" disabled={isSubmitting || uploading} className="w-full sm:w-fit">
             {isSubmitting ? 'Saving…' : uploading ? 'Waiting for uploads…' : 'Continue to pricing'}
@@ -262,8 +299,8 @@ export default function NewAuctionPage() {
 
         <aside aria-label="Listing preview" className="lg:sticky lg:top-24">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink/60">Live preview</p>
-          <div className="overflow-hidden rounded-2xl border-2 border-ink bg-white shadow-hard-sm">
-            <div className="relative flex aspect-square items-center justify-center overflow-hidden border-b-2 border-ink bg-cream-2">
+          <div className="overflow-hidden rounded-2xl border-2 border-line bg-white shadow-hard-sm">
+            <div className="relative flex aspect-square items-center justify-center overflow-hidden border-b-2 border-line bg-cream-2">
               {imageUrls[0] ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={imageUrls[0]} alt="" className="h-full w-full object-cover" />
@@ -271,7 +308,7 @@ export default function NewAuctionPage() {
                 <Mascot className="h-20 w-20 opacity-70" />
               )}
               {previewCategory && (
-                <span className="absolute left-2 top-2 rounded-full border-2 border-ink bg-cream px-2 py-0.5 text-xs font-semibold">
+                <span className="absolute left-2 top-2 rounded-full border-2 border-line bg-cream px-2 py-0.5 text-xs font-semibold">
                   {previewCategory.emoji} {previewCategory.label}
                 </span>
               )}

@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { ApiError } from '@/lib/apiClient';
+import { resendVerificationRequest } from '@/lib/auth';
 import { getBidErrorMessage } from '@/lib/bidErrors';
 import { placeBidRequest } from '@/lib/bids';
 import { formatCents } from '@/lib/format';
@@ -38,6 +39,8 @@ export function BidForm({
 }) {
   const queryClient = useQueryClient();
   const [serverError, setServerError] = useState<string | null>(null);
+  const [needsVerification, setNeedsVerification] = useState(false);
+  const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent'>('idle');
   const [extended, setExtended] = useState(false);
   const [placed, setPlaced] = useState<number | null>(null);
 
@@ -51,6 +54,8 @@ export function BidForm({
 
   const onSubmit = async (values: BidFormValues) => {
     setServerError(null);
+    setNeedsVerification(false);
+    setResendState('idle');
     setExtended(false);
     setPlaced(null);
     const amountCents = Math.round(Number(values.amount) * 100);
@@ -74,6 +79,17 @@ export function BidForm({
       ]);
     } catch (err) {
       setServerError(err instanceof ApiError ? getBidErrorMessage(err) : 'Something went wrong. Please try again.');
+      setNeedsVerification(err instanceof ApiError && err.code === 'EMAIL_NOT_VERIFIED');
+    }
+  };
+
+  const handleResend = async () => {
+    setResendState('sending');
+    try {
+      await resendVerificationRequest(accessToken);
+      setResendState('sent');
+    } catch {
+      setResendState('idle');
     }
   };
 
@@ -113,7 +129,7 @@ export function BidForm({
             key={step}
             type="button"
             onClick={() => fillQuick(step)}
-            className="rounded-full border-2 border-ink bg-white px-3 py-1 text-sm font-semibold transition-colors hover:bg-yellow"
+            className="rounded-full border-2 border-line bg-white px-3 py-1 text-sm font-semibold transition-colors hover:bg-yellow"
           >
             +{formatCents(step).replace('.00', '')}
           </button>
@@ -124,7 +140,22 @@ export function BidForm({
         {isSubmitting ? 'Placing bid…' : 'Place bid'}
       </Button>
 
-      {serverError && <Notice tone="error">{serverError}</Notice>}
+      {serverError && (
+        <Notice tone="error">
+          <p>{serverError}</p>
+          {needsVerification && (
+            <div className="mt-2">
+              {resendState === 'sent' ? (
+                <span className="text-sm font-semibold">Check your inbox — a new link is on its way.</span>
+              ) : (
+                <Button type="button" size="sm" variant="secondary" disabled={resendState === 'sending'} onClick={handleResend}>
+                  {resendState === 'sending' ? 'Sending…' : 'Resend verification email'}
+                </Button>
+              )}
+            </div>
+          )}
+        </Notice>
+      )}
       {placed !== null && !serverError && (
         <Notice tone="success">
           Bid of {formatCents(placed)} placed.

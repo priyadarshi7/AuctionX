@@ -75,6 +75,12 @@ export default function LoginPage() {
           error={errors.password?.message}
           {...register('password')}
         />
+        <Link
+          href="/forgot-password"
+          className="-mt-2 self-end text-sm font-semibold text-ink/70 underline underline-offset-4 hover:text-ink"
+        >
+          Forgot password?
+        </Link>
         {serverError && <Notice tone="error">{serverError}</Notice>}
         <Button type="submit" disabled={isSubmitting} className="mt-1 w-full">
           {isSubmitting ? 'Logging in…' : 'Log in'}

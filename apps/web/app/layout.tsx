@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Bricolage_Grotesque, Caveat } from "next/font/google";
 import { NavBar } from "./NavBar";
 import { Providers } from "./providers";
+import { VerificationBanner } from "./components/VerificationBanner";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -39,6 +40,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full flex flex-col bg-cream text-ink">
         <Providers>
           <NavBar />
+          <VerificationBanner />
           {children}
         </Providers>
       </body>

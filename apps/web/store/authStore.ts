@@ -6,6 +6,11 @@ export type PublicUser = {
   name: string;
   role: 'USER' | 'ADMIN';
   status: 'ACTIVE' | 'SUSPENDED' | 'BANNED';
+  // null = unverified. Soft gate (2026-09-30): browsing/login never require
+  // this, but selling and bidding do (services/api's createNewAuction /
+  // placeBid) — components that show a "verify your email" nudge key off
+  // this being null, not off `status`, which is unrelated.
+  emailVerifiedAt: string | null;
   createdAt: string;
 };
 

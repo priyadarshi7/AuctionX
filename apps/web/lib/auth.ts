@@ -1,6 +1,6 @@
 import { apiFetch } from './apiClient';
 import type { PublicUser } from '@/store/authStore';
-import type { LoginFormValues, RegisterFormValues } from './validation/auth';
+import type { ForgotPasswordFormValues, LoginFormValues, RegisterFormValues } from './validation/auth';
 
 // Mirrors services/api/src/modules/auth/controller.ts's actual response
 // shapes for these three endpoints.
@@ -23,4 +23,23 @@ export function refreshRequest(): Promise<AuthSession> {
 
 export function logoutRequest(): Promise<void> {
   return apiFetch<void>('/auth/logout', { method: 'POST' });
+}
+
+export function verifyEmailRequest(token: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>('/auth/verify-email', { method: 'POST', body: { token } });
+}
+
+export function resendVerificationRequest(accessToken: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>('/auth/resend-verification', { method: 'POST', accessToken });
+}
+
+export function forgotPasswordRequest(values: ForgotPasswordFormValues): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>('/auth/forgot-password', { method: 'POST', body: values });
+}
+
+export function resetPasswordRequest(token: string, newPassword: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>('/auth/reset-password', {
+    method: 'POST',
+    body: { token, newPassword },
+  });
 }
