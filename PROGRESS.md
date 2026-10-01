@@ -118,8 +118,14 @@ Render or Fly.io (backend), Neon or Supabase (Postgres), Upstash Redis,
 Redpanda Cloud Serverless (Kafka — NOT skipped, see below; originally
 planned as Upstash Kafka until the developer caught, live, that it's
 deprecated — switched to Redpanda Cloud specifically because it's the
-same tech already running locally), Cloudflare R2 (storage). OpenSearch
-and Ollama ARE being skipped for v1 — both were deliberately built to
+same tech already running locally), Backblaze B2 (storage — originally
+planned as Cloudflare R2, but R2 genuinely requires a credit card to
+activate even for free-tier use, which isn't available; B2 is also
+no-card AND S3-compatible, so it's still the zero-code-change config
+swap R2 was meant to be; Cloudinary was the other no-card option but
+was already considered and rejected once before in ADR-0022 for not
+being S3-compatible). OpenSearch and Ollama ARE being skipped for v1 —
+both were deliberately built to
 degrade gracefully (ADR-0029/ADR-0032), so this costs nothing broken.
 Kafka is the one exception to "skip what has no free tier": since
 ADR-0027, `Notification` rows are created ONLY by the Kafka consumer, so

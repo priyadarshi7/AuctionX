@@ -26,7 +26,9 @@ Backend API (services/api) -> Render or Fly.io (verify current free-tier
                                limits at signup time — they change)
 PostgreSQL                 -> Neon or Supabase
 Redis                      -> Upstash Redis
-Object storage              -> Cloudflare R2
+Object storage              -> Backblaze B2 (see "Why" below — NOT R2,
+                               which needs a credit card the developer
+                               doesn't have)
 Kafka                      -> Redpanda Cloud Serverless (see "Why" below
                                — NOT skipped; originally planned as
                                Upstash Kafka, which the developer caught
@@ -54,13 +56,41 @@ just "both happen to speak the Kafka protocol." Confluent Cloud's $400
 credit + $0-while-idle tier was the runner-up, noted here in case
 Redpanda Cloud's terms ever change.
 
+**Object storage went through two rounds of real-numbers checking, not
+one assumption**:
+
+1. First concern raised (directly: "Cloudfare R2 may charge extra for
+   Class A operations, we are avoiding that"): checked R2's actual free
+   tier rather than assuming — 10GB storage + 1M Class A (write) ops/
+   month + 10M Class B (read) ops/month + ALWAYS-free egress, no cap.
+   That margin is roughly 32,000 uploads/day before R2 costs anything.
+   Checked the alternative raised by the concern (Supabase Storage,
+   since Postgres already lives there — one fewer vendor) too: only 1GB
+   storage + 5GB/month egress SHARED across the entire Supabase project
+   (Postgres + Auth + Storage draw from the same pool) — a bigger
+   practical risk for an image-heavy read pattern (every browse-page
+   view re-fetches auction photos) than R2's write-side pricing ever is
+   at this project's scale. Conclusion at that point: stay on R2.
+2. **Then a real, separate blocker surfaced**: R2 genuinely requires a
+   credit card on file to activate, even for free-tier-only usage — not
+   available here. Checked two no-card alternatives: Cloudinary (no
+   card, confirmed) and Backblaze B2 (no card, confirmed). Cloudinary
+   was already considered and rejected once before, during the original
+   MEDIA-001 task (ADR-0022) — it isn't S3-compatible, so adopting it
+   now would mean writing an entirely separate upload code path and
+   reversing that earlier decision's whole reasoning (local dev's
+   s3mock and production staying on the same generic S3 client code).
+   Backblaze B2 is ALSO S3-compatible — a pure config swap, zero changes
+   to `s3Client.ts`/`presign.ts`, exactly what R2 was originally chosen
+   to be. **Final decision: Backblaze B2.**
+
 **A real gap found while filling in real credentials, not assumed**:
 `infrastructure/kafka/client.ts` only ever configured `clientId`/
 `brokers` — no `sasl`/`ssl` options at all, since it was only ever built
 against a plaintext local broker. This means wiring up ANY managed Kafka
 provider (Redpanda Cloud, Confluent, or anything else) needs a real, small
 code change (SASL_SSL auth) before it will actually connect — not just a
-config value paste like Postgres/Redis/R2 are. Deferred until real
+config value paste like Postgres/Redis/B2 are. Deferred until real
 Redpanda Cloud credentials exist to verify the auth wiring against, same
 "verify live, don't assume" discipline as the rest of this deployment.
 
