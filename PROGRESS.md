@@ -122,13 +122,17 @@ deprecated; then Redpanda Cloud Serverless, caught live as only a
 confirmed genuinely free indefinitely, no card — 5-topic cap checked
 against this app's real 5 source topics, judged an acceptable risk since
 DLQ-topic-publish failures were already handled gracefully before this),
-Backblaze B2 (storage — originally
-planned as Cloudflare R2, but R2 genuinely requires a credit card to
-activate even for free-tier use, which isn't available; B2 is also
-no-card AND S3-compatible, so it's still the zero-code-change config
-swap R2 was meant to be; Cloudinary was the other no-card option but
-was already considered and rejected once before in ADR-0022 for not
-being S3-compatible). OpenSearch and Ollama ARE being skipped for v1 —
+Supabase Storage (storage — went through THREE options: Cloudflare R2
+ruled out, genuinely requires a credit card to activate even for
+free-tier use; Backblaze B2 ruled out next, confirmed directly that B2's
+own policy requires a payment history or a ~$1 charge specifically to
+make a bucket PUBLIC, same root no-card blocker; Cloudinary was
+available card-free but already rejected once before in ADR-0022 for
+not being S3-compatible. Supabase Storage is officially S3-compatible
+(zero code changes, same as R2/B2 would've been) with no card gate
+found on public buckets — real tradeoff accepted: only 1GB storage +
+5GB/month egress shared across the whole Supabase project). OpenSearch
+and Ollama ARE being skipped for v1 —
 both were deliberately built to
 degrade gracefully (ADR-0029/ADR-0032), so this costs nothing broken.
 Kafka is the one exception to "skip what has no free tier": since
@@ -139,13 +143,28 @@ graceful degradation.
 **Real credentials now exist and are being verified live as they're
 created** (`services/api/.env.production.local`, gitignored fill-in
 checklist): Upstash Redis confirmed working end-to-end (`PING` ->
-`PONG` against the real instance). The first Supabase `DATABASE_URL`
-pasted in didn't resolve in DNS at all (`ENOTFOUND`) — flagged back to
-the developer to re-copy the exact connection string rather than guessed
-at. Also found while filling in real values, not assumed:
+`PONG` against the real instance).
+
+**Postgres (Supabase) is now FULLY live-verified, not just reachable**,
+after two real, separate fixes (full story in ADR-0036): (1) Supabase's
+default "direct connection" host had no public DNS record at all for
+this project — confirmed via Node, `curl`, and an external DNS-over-HTTPS
+lookup, ruling out a local network issue; fixed by switching to the
+POOLER connection string instead. (2) The pooler's default
+TRANSACTION-mode port (6543) connects fine for plain queries but made
+`npx prisma migrate deploy` fail outright with `P1017` — Prisma Migrate
+needs session-level Postgres features (advisory locks) that PgBouncer
+transaction-mode doesn't support; fixed by using the same pooler host's
+SESSION-mode port (5432) instead, for both migrations and runtime
+traffic. **Ran the real migration**: all 13 existing migrations applied
+clean against the live database; confirmed with a real model query
+(`prisma.user.count()`) that all 11 application tables exist and are
+queryable.
+
+Also found while filling in real values, not assumed:
 `infrastructure/kafka/client.ts` has never configured `sasl`/`ssl` at
 all (only ever built against a plaintext local broker) — real, small,
-pending code work needed before Redpanda Cloud will actually authenticate,
+pending code work needed before Aiven Kafka will actually authenticate,
 deferred until real credentials exist to verify the wiring against.
 
 New `services/api/Dockerfile` + root `.dockerignore`, built and verified
@@ -176,16 +195,15 @@ not this project's own self-hosted Redpanda container) and local dev was
 never containerized anyway, so left alone rather than adding
 multi-listener Kafka config for a need that doesn't exist yet.
 
-**Next steps, in order**: developer re-copies the correct Supabase (or
-switches to Neon) connection string; creates Redpanda Cloud Serverless +
-Cloudflare R2 + Render/Fly + Vercel; pastes real env vars into each
-platform's own dashboard once verified (never into chat/committed files
-— same secret-handling precedent as AUTH-007's Gmail App Password); runs
-`npx prisma migrate deploy` against the new Postgres as a release step,
-not baked into the Docker image's own boot. I still owe the Kafka
-SASL_SSL wiring once Redpanda Cloud credentials exist. Then: Admin panel
-+ auction moderation queue, then real Stripe (test mode) as the agreed next
-milestone after going live.
+**Next steps, in order**: Postgres is DONE (real Supabase database,
+migrated, verified). Remaining: developer creates Aiven Kafka +
+Supabase Storage bucket + Render/Fly + Vercel; pastes real env vars into
+each platform's own dashboard once verified (never into chat/committed
+files — same secret-handling precedent as AUTH-007's Gmail App
+Password). I still owe: the Kafka SASL_SSL wiring once Aiven credentials
+exist, and a live presign+upload+GET test once Supabase Storage
+credentials exist. Then: Admin panel + auction moderation queue, then
+real Stripe (test mode) as the agreed next milestone after going live.
 
 ---
 

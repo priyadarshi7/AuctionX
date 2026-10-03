@@ -26,9 +26,9 @@ Backend API (services/api) -> Render or Fly.io (verify current free-tier
                                limits at signup time — they change)
 PostgreSQL                 -> Neon or Supabase
 Redis                      -> Upstash Redis
-Object storage              -> Backblaze B2 (see "Why" below — NOT R2,
-                               which needs a credit card the developer
-                               doesn't have)
+Object storage              -> Supabase Storage (see "Why" below — went
+                               through R2 and Backblaze B2 first, both
+                               ruled out by the same no-card constraint)
 Kafka                      -> Aiven for Apache Kafka (see "Why" below —
                                NOT skipped; went through two providers
                                before this one, see history below)
@@ -79,8 +79,9 @@ already designed to tolerate, not a new failure mode introduced by this
 choice. Confluent Cloud ($400 credit + $0-while-idle) remains a noted
 fallback if Aiven's terms or this topic-count math ever changes.
 
-**Object storage went through two rounds of real-numbers checking, not
-one assumption**:
+**Object storage went through three rounds of real-numbers checking, not
+one assumption — and landed somewhere smaller-but-actually-usable rather
+than bigger-but-blocked**:
 
 1. First concern raised (directly: "Cloudfare R2 may charge extra for
    Class A operations, we are avoiding that"): checked R2's actual free
@@ -90,10 +91,10 @@ one assumption**:
    Checked the alternative raised by the concern (Supabase Storage,
    since Postgres already lives there — one fewer vendor) too: only 1GB
    storage + 5GB/month egress SHARED across the entire Supabase project
-   (Postgres + Auth + Storage draw from the same pool) — a bigger
-   practical risk for an image-heavy read pattern (every browse-page
-   view re-fetches auction photos) than R2's write-side pricing ever is
-   at this project's scale. Conclusion at that point: stay on R2.
+   (Postgres + Auth + Storage draw from the same pool) — at that point,
+   a bigger practical risk for an image-heavy read pattern (every
+   browse-page view re-fetches auction photos) than R2's write-side
+   pricing. Conclusion at that point: stay on R2.
 2. **Then a real, separate blocker surfaced**: R2 genuinely requires a
    credit card on file to activate, even for free-tier-only usage — not
    available here. Checked two no-card alternatives: Cloudinary (no
@@ -103,9 +104,21 @@ one assumption**:
    now would mean writing an entirely separate upload code path and
    reversing that earlier decision's whole reasoning (local dev's
    s3mock and production staying on the same generic S3 client code).
-   Backblaze B2 is ALSO S3-compatible — a pure config swap, zero changes
-   to `s3Client.ts`/`presign.ts`, exactly what R2 was originally chosen
-   to be. **Final decision: Backblaze B2.**
+   Backblaze B2 is ALSO S3-compatible — a pure config swap. Decision at
+   that point: Backblaze B2.
+3. **A second, equally real blocker surfaced on B2 specifically**:
+   confirmed directly against Backblaze's own documentation — making a
+   bucket PUBLIC (required, since this app serves images via a
+   permanent direct URL, not signed/expiring GET requests) needs either
+   an existing payment history or a one-time ~$1 verification charge.
+   Same root constraint as R2: a card, somewhere. Re-checked Supabase
+   Storage with this specific question in mind (not re-litigating the
+   egress-size tradeoff from round 1, which still applies) — confirmed
+   it's officially S3-compatible (GA status, not a workaround) and found
+   no evidence of any payment gate on public buckets. **Final decision:
+   Supabase Storage**, accepting the smaller 1GB/5GB-shared-egress
+   allowance from round 1 as the real cost of the hard no-card
+   constraint overriding the "biggest free tier" optimization.
 
 **A real gap found while filling in real credentials, not assumed**:
 `infrastructure/kafka/client.ts` only ever configured `clientId`/
@@ -113,10 +126,42 @@ one assumption**:
 against a plaintext local broker. This means wiring up ANY managed Kafka
 provider (Aiven, Redpanda Cloud, Confluent, or anything else) needs a
 real, small code change (SASL_SSL auth) before it will actually connect
-— not just a config value paste like Postgres/Redis/B2 are. Deferred
+— not just a config value paste like Postgres/Redis/Supabase Storage
+are. Deferred
 until real Aiven credentials exist to verify the auth wiring against,
 same "verify live, don't assume" discipline as the rest of this
 deployment.
+
+**Postgres (Supabase) took two real, separate fixes before migrations
+actually applied — both found live, neither assumed**:
+
+1. Supabase's "direct connection" host (`db.<ref>.supabase.co:5432`,
+   the one shown by default) had NO public DNS record at all for this
+   project — confirmed independently via Node, `curl`, AND an external
+   DNS-over-HTTPS lookup against Cloudflare's resolver, specifically to
+   rule out a local network problem before concluding it was real
+   (`google.com` resolved instantly throughout). Fixed by switching to
+   Supabase's POOLER connection string instead (Project Settings ->
+   Database -> Connection Pooling) — a different host entirely
+   (`aws-0-<region>.pooler.supabase.com`) and a different username
+   format (`postgres.<project-ref>`, not just `postgres`).
+2. The pooler's TRANSACTION-mode port (6543, Supabase's own default
+   tab) connects fine for ordinary queries but `npx prisma migrate
+   deploy` failed outright with `P1017` ("server has closed the
+   connection"): Prisma Migrate depends on session-level Postgres
+   features (advisory locks, to prevent two concurrent migration runs)
+   that PgBouncer's transaction-pooling mode doesn't support. Fixed by
+   using the SAME pooler host's SESSION-mode port (5432) instead of
+   transaction-mode (6543). Since this app runs as one persistent
+   long-lived process (Render/Fly), not a serverless function needing
+   thousands of parallel pooled connections, session mode was kept for
+   BOTH migrations and normal runtime traffic — one connection string,
+   not two to maintain.
+
+Verified past "it connects": `npx prisma migrate deploy` applied all 13
+existing migrations clean against the real database, and a real model
+query (`prisma.user.count()`) confirmed all 11 application tables exist
+and are queryable, not just that the migration tool exited 0.
 
 **New `services/api/Dockerfile`**: multi-stage build. The build context is
 the REPO ROOT, not `services/api` — this is an npm workspaces monorepo
