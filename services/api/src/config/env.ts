@@ -87,6 +87,22 @@ const envSchema = z.object({
   // already retry indefinitely rather than crash the process.
   // 127.0.0.1, not localhost (ADR-0034).
   KAFKA_BROKERS: z.string().min(1).default('127.0.0.1:9092'),
+  // SASL_SSL credentials for a managed broker (Aiven — ADR-0036). All three
+  // optional and unset by default: local Redpanda runs with no auth at all,
+  // so the Kafka client must still boot plaintext when these are absent.
+  // When KAFKA_SASL_USERNAME is set, infrastructure/kafka/client.ts treats
+  // that as the signal to also require the other two and switch the whole
+  // connection to SASL_SSL.
+  KAFKA_SASL_USERNAME: z.string().min(1).optional(),
+  KAFKA_SASL_PASSWORD: z.string().min(1).optional(),
+  // PEM content with real newlines replaced by literal "\n" — both a .env
+  // file and Render/Fly's dashboard are single-line text fields, so this is
+  // the standard way to carry a multi-line certificate through one env var.
+  // client.ts un-escapes it back to real newlines before passing it to
+  // kafkajs's ssl.ca. Aiven's SASL auth runs over TLS using a private
+  // per-project CA, not a publicly trusted one — Node's default trust store
+  // will reject the connection without this.
+  KAFKA_SSL_CA: z.string().min(1).optional(),
   // Section 30: register/login/refresh are pre-authentication, so this is
   // keyed by IP alone (middleware/rateLimit.ts's authRateLimit) — every
   // account tested from the same dev machine shares one bucket. Defaults to
@@ -123,6 +139,18 @@ const envSchema = z.object({
   // seconds per call, not milliseconds — generous on purpose, this is a
   // background worker's timeout, never on any user-facing request path.
   OLLAMA_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+}).superRefine((value, ctx) => {
+  // Fail fast (Section 51) on a half-configured SASL setup rather than
+  // booting and only discovering the gap when Kafka first tries to connect.
+  if (value.KAFKA_SASL_USERNAME && (!value.KAFKA_SASL_PASSWORD || !value.KAFKA_SSL_CA)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        'KAFKA_SASL_USERNAME is set but KAFKA_SASL_PASSWORD and/or KAFKA_SSL_CA is missing — ' +
+        'all three are required together for SASL_SSL, or none of them for a local unauthenticated broker.',
+      path: ['KAFKA_SASL_USERNAME'],
+    });
+  }
 });
 
 // Parse and Check Schema
