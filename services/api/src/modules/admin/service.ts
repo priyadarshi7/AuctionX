@@ -1,5 +1,6 @@
 import type { AdminAuditLog, Auction, AuctionStatus, Order, OrderStatus, Role, User, UserStatus } from '@prisma/client';
 import { notifyAuctionChanged } from '../../infrastructure/realtime/auctionEvents';
+import { clearUserBlocked, markUserBlocked } from '../../infrastructure/security/blockedUsers';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../middleware/errors';
 import {
   changeTrustedSeller,
@@ -109,6 +110,9 @@ export async function setUserStatusAsAdmin(
 
   const changed = await changeUserStatus(actorId, targetId, status, reason);
   if (changed) {
+    // Take effect on already-issued access tokens too (see blockedUsers.ts).
+    if (status === 'ACTIVE') await clearUserBlocked(targetId);
+    else await markUserBlocked(targetId);
     return toAdminUserView(changed.user);
   }
   // Nothing changed: either already in that status, or deleted meanwhile.

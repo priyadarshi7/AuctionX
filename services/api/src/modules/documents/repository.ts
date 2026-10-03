@@ -25,8 +25,23 @@ export type NewDocument = {
   sizeBytes: number;
 };
 
-export function createDocument(data: NewDocument): Promise<AuctionDocument> {
-  return prisma.auctionDocument.create({ data });
+// Registers a document under the auction row's lock, so the cap and the
+// "still a DRAFT" rule are exact under concurrency: two simultaneous
+// registrations (or a registration racing the seller's submit, whose guarded
+// UPDATE takes the same row lock) serialize, and the second one sees the
+// first one's effect.
+export function createDocumentWithinLimit(
+  data: NewDocument,
+  max: number,
+): Promise<AuctionDocument | 'FULL' | 'LOCKED'> {
+  return prisma.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<{ status: string }[]>`
+      SELECT status::text AS status FROM auctions WHERE id = ${data.auctionId} FOR UPDATE
+    `;
+    if (rows[0]?.status !== 'DRAFT') return 'LOCKED' as const;
+    if ((await tx.auctionDocument.count({ where: { auctionId: data.auctionId } })) >= max) return 'FULL' as const;
+    return tx.auctionDocument.create({ data });
+  });
 }
 
 export function deleteDocumentRow(id: string): Promise<AuctionDocument> {

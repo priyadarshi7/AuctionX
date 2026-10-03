@@ -3,6 +3,7 @@ import request from 'supertest';
 import { createApp } from '../../src/app';
 import { prisma } from '../../src/infrastructure/database/prisma';
 import { hashPassword } from '../../src/infrastructure/security/password';
+import { clearUserBlocked } from '../../src/infrastructure/security/blockedUsers';
 
 const app = createApp();
 
@@ -258,8 +259,21 @@ describe('a banned user still holding a valid access token', () => {
       .post(`/api/v1/auctions/${auctionId}/bids`)
       .set('Authorization', `Bearer ${banned.accessToken}`)
       .send({ amountCents: 2000, idempotencyKey: randomUUID() });
-    expect(bid.status).toBe(403);
+    // First line of defence: the blocked-user marker refuses the token itself.
+    expect(bid.status).toBe(401);
     expect(bid.body.error.code).toBe('ACCOUNT_DISABLED');
+    expect(await prisma.bid.count({ where: { auctionId } })).toBe(0);
+
+    // Second line: with the marker gone (Redis down or flushed) the token
+    // passes authentication, but the bid and listing paths re-check status in
+    // PostgreSQL, so money paths stay closed.
+    await clearUserBlocked(banned.id);
+    const bidWithoutMarker = await request(app)
+      .post(`/api/v1/auctions/${auctionId}/bids`)
+      .set('Authorization', `Bearer ${banned.accessToken}`)
+      .send({ amountCents: 2000, idempotencyKey: randomUUID() });
+    expect(bidWithoutMarker.status).toBe(403);
+    expect(bidWithoutMarker.body.error.code).toBe('ACCOUNT_DISABLED');
     expect(await prisma.bid.count({ where: { auctionId } })).toBe(0);
 
     const create = await request(app)

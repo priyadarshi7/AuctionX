@@ -225,33 +225,55 @@ export function withdrawAuctionRow(id: string): Promise<Auction | null> {
   });
 }
 
-export function startAuctionRow(id: string): Promise<Auction> {
+// start / pause / cancel are guarded transitions (ADR-0038's idiom): the
+// required source state is part of the UPDATE's WHERE, evaluated against the
+// committed row, not a prior read. A seller's click racing the closing worker
+// (or a moderator) therefore matches nothing and returns null instead of
+// overwriting an ENDED auction that already has an Order behind it.
+async function guardedTransition(
+  id: string,
+  where: Prisma.AuctionWhereInput,
+  data: Prisma.AuctionUpdateManyMutationInput,
+): Promise<Auction | null> {
   return prisma.$transaction(async (tx) => {
-    const auction = await tx.auction.update({ where: { id }, data: { status: 'ACTIVE' } });
+    const { count } = await tx.auction.updateMany({ where: { id, ...where }, data });
+    if (count === 0) return null;
     await publishReindexEvent(tx, id);
-    return auction;
+    return tx.auction.findUniqueOrThrow({ where: { id } });
   });
 }
 
-export function pauseAuctionRow(id: string): Promise<Auction> {
-  return prisma.$transaction(async (tx) => {
-    const auction = await tx.auction.update({ where: { id }, data: { status: 'PAUSED' } });
-    await publishReindexEvent(tx, id);
-    return auction;
-  });
+// Resume/start also requires the schedule to still be in the future and no
+// moderator hold, so it can't resume straight into the closing worker.
+export function startAuctionRow(id: string): Promise<Auction | null> {
+  return guardedTransition(
+    id,
+    { status: { in: ['PUBLISHED', 'PAUSED'] }, heldByAdmin: false, endTime: { gt: new Date() } },
+    { status: 'ACTIVE' },
+  );
+}
+
+export function pauseAuctionRow(id: string): Promise<Auction | null> {
+  return guardedTransition(id, { status: 'ACTIVE' }, { status: 'PAUSED' });
 }
 
 // endedAt records the real end moment, distinct from the scheduled endTime
 // (ADR-0007) — a cancellation is precisely the case where they diverge.
-export function cancelAuctionRow(id: string, wasLive: boolean): Promise<Auction> {
-  return prisma.$transaction(async (tx) => {
-    const auction = await tx.auction.update({
-      where: { id },
-      data: { status: 'CANCELLED', endedAt: new Date(), ...(wasLive ? {} : { startTime: null }) },
-    });
-    await publishReindexEvent(tx, id);
-    return auction;
-  });
+// A listing cancelled before it ever went live (DRAFT / PENDING_REVIEW) also
+// has startTime cleared so it stays out of Browse (see isNeverLive).
+export async function cancelAuctionRow(id: string): Promise<Auction | null> {
+  const now = new Date();
+  const live = await guardedTransition(
+    id,
+    { status: { in: ['PUBLISHED', 'ACTIVE', 'PAUSED'] } },
+    { status: 'CANCELLED', endedAt: now },
+  );
+  if (live) return live;
+  return guardedTransition(
+    id,
+    { status: { in: ['DRAFT', 'PENDING_REVIEW'] } },
+    { status: 'CANCELLED', endedAt: now, startTime: null },
+  );
 }
 
 // The closing worker's unlocked candidate scan (infrastructure/jobs/

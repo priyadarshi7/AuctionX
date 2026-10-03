@@ -72,11 +72,6 @@ type LockedReadRow = {
   existingBidAmountCents: number | null;
   existingBidIdempotencyKey: string | null;
   existingBidCreatedAt: Date | null;
-  prevBidId: string | null;
-  prevBidBidderId: string | null;
-  prevBidAmountCents: number | null;
-  prevBidIdempotencyKey: string | null;
-  prevBidCreatedAt: Date | null;
 };
 
 // This is Section 10's bid pipeline made real, as ONE Postgres transaction:
@@ -103,19 +98,19 @@ export async function placeBidTransactionally(
   validate: (auction: LockedAuctionRow | undefined) => void,
 ): Promise<PlaceBidResult> {
   return prisma.$transaction(async (tx) => {
-    // Round trip 1 of 2: the row lock, the post-lock idempotency re-check,
-    // and the previous-highest-bid lookup, as one query. `FOR UPDATE OF a`
-    // locks only the auctions row — the same lock as before — not whatever
-    // rows the joins match. Both joined reads still happen after/under that
-    // lock, which is what keeps their old correctness guarantees:
+    // Round trip 1 of 2: the row lock plus an idempotency pre-check, as one
+    // query. `FOR UPDATE OF a` locks only the auctions row.
     //
-    // - Idempotency re-check: a request that loses the race for the lock
-    //   must see its twin's (same key) already-committed insert here,
-    //   rather than validating against a price that twin already raised
-    //   and wrongly rejecting a legitimate retry as "too low".
-    // - Previous highest bid: who THIS bid is about to outbid must be read
-    //   under the same lock as the insert, or another bid could land in
-    //   between and make the answer refer to the wrong bid.
+    // READ COMMITTED subtlety (found by place-bid.test.ts, not assumed): when
+    // this statement has to WAIT for the lock, Postgres re-reads the locked
+    // auctions row afterwards, but every OTHER table in the statement keeps
+    // the snapshot from before the wait. So the `e` join below is only a
+    // best-effort replay check: a retry that waited behind its own twin can
+    // miss the twin's bid here. That is safe, never a double-accept: the
+    // unique (bidderId, idempotencyKey) index rejects the insert, and
+    // service.ts turns that (or the spurious validation failure) into a
+    // replay with a fresh lookup. The previous-highest-bid lookup, which
+    // must be exact, therefore lives in round trip 2, not here.
     const rows = await tx.$queryRaw<LockedReadRow[]>`
       SELECT
         a.id AS "auctionId",
@@ -128,22 +123,10 @@ export async function placeBidTransactionally(
         e."bidderId" AS "existingBidBidderId",
         e."amountCents" AS "existingBidAmountCents",
         e."idempotencyKey" AS "existingBidIdempotencyKey",
-        e."createdAt" AS "existingBidCreatedAt",
-        p.id AS "prevBidId",
-        p."bidderId" AS "prevBidBidderId",
-        p."amountCents" AS "prevBidAmountCents",
-        p."idempotencyKey" AS "prevBidIdempotencyKey",
-        p."createdAt" AS "prevBidCreatedAt"
+        e."createdAt" AS "existingBidCreatedAt"
       FROM auctions a
       LEFT JOIN bids e
         ON e."bidderId" = ${bid.bidderId} AND e."idempotencyKey" = ${bid.idempotencyKey}
-      LEFT JOIN LATERAL (
-        SELECT id, "bidderId", "amountCents", "idempotencyKey", "createdAt"
-        FROM bids
-        WHERE "auctionId" = a.id
-        ORDER BY "createdAt" DESC
-        LIMIT 1
-      ) p ON true
       WHERE a.id = ${auctionId}
       FOR UPDATE OF a
     `;
@@ -184,15 +167,6 @@ export async function placeBidTransactionally(
     // reaching this line means it's safe to use non-null below.
     const auction = lockedAuction as LockedAuctionRow;
 
-    const previousHighestBid = bidFromRawColumns(
-      row?.prevBidId ?? null,
-      auctionId,
-      row?.prevBidBidderId ?? null,
-      row?.prevBidAmountCents ?? null,
-      row?.prevBidIdempotencyKey ?? null,
-      row?.prevBidCreatedAt ?? null,
-    );
-
     // Anti-sniping (Section 18): computed from the locked read and written
     // in the same transaction as the bid itself, so there's no window where
     // the bid is accepted but the extension hasn't happened (or vice versa).
@@ -201,12 +175,6 @@ export async function placeBidTransactionally(
     // no-op, and one unconditional SET is simpler than a conditional SQL
     // fragment.
     const finalEndTime = extendedEndTime ?? auction.endTime;
-
-    // No outbid event for an auction's first bid, or for a bidder
-    // immediately re-outbidding themselves — nothing useful to tell them.
-    // Keyed by auctionId (Section 15): outbid events for one auction must
-    // be consumed in the order they happened.
-    const shouldPublishOutbid = previousHighestBid !== null && previousHighestBid.bidderId !== bid.bidderId;
 
     // Raw SQL bypasses Prisma's client-side @default(uuid()) — the id
     // columns have no database default — so ids are generated here.
@@ -220,13 +188,6 @@ export async function placeBidTransactionally(
     // Via the Outbox (ADR-0027), not a direct Notification insert — the
     // notifications consumer does that work asynchronously, off this
     // transaction (Section 64).
-    const outbidPayload = JSON.stringify({
-      type: 'bid.outbid',
-      auctionId,
-      outbidUserId: previousHighestBid?.bidderId ?? null,
-      previousAmountCents: previousHighestBid?.amountCents ?? null,
-      newAmountCents: bid.amountCents,
-    });
 
     // Round trip 2 of 2: INSERT the bid, UPDATE the auction, INSERT the
     // reindex outbox event, and conditionally INSERT the outbid outbox event
@@ -240,9 +201,24 @@ export async function placeBidTransactionally(
     // other CTE yields at most one, so the LEFT JOIN ... ON true chain can
     // neither drop nor multiply the result: exactly one row comes back.
     const rowsWritten = await tx.$queryRaw<Bid[]>`
-      WITH new_bid AS (
+      WITH prev AS (
+        -- Who this bid outbids. Exact, because this statement takes a fresh
+        -- snapshot while this transaction already holds the auction lock, so
+        -- no other bid on this auction can be committed or missed. Highest
+        -- amount, not latest timestamp: price is what defines "leading".
+        SELECT "bidderId", "amountCents"
+        FROM bids
+        WHERE "auctionId" = ${auctionId}
+        ORDER BY "amountCents" DESC, "createdAt" DESC
+        LIMIT 1
+      ),
+      new_bid AS (
+        -- clock_timestamp(), not now(): now() is the transaction START time,
+        -- which can precede a rival transaction's even though this one took
+        -- the lock second. Bid history is ordered by createdAt, so it must be
+        -- the moment of acceptance.
         INSERT INTO bids (id, "auctionId", "bidderId", "amountCents", "idempotencyKey", "createdAt")
-        VALUES (${newBidId}, ${auctionId}, ${bid.bidderId}, ${bid.amountCents}, ${bid.idempotencyKey}, now())
+        VALUES (${newBidId}, ${auctionId}, ${bid.bidderId}, ${bid.amountCents}, ${bid.idempotencyKey}, clock_timestamp())
         RETURNING id, "auctionId", "bidderId", "amountCents", "idempotencyKey", "createdAt"
       ),
       updated_auction AS (
@@ -259,9 +235,19 @@ export async function placeBidTransactionally(
       ),
       outbid_event AS (
         INSERT INTO outbox_events (id, topic, key, payload, "createdAt")
-        SELECT ${outbidEventId}, 'bid-events', ${auctionId}, ${outbidPayload}::jsonb, now()
-        FROM new_bid
-        WHERE ${shouldPublishOutbid}
+        -- No event for an auction's first bid (prev is empty), or for a
+        -- bidder re-outbidding themselves. Keyed by auctionId (Section 15).
+        SELECT ${outbidEventId}, 'bid-events', ${auctionId},
+          jsonb_build_object(
+            'type', 'bid.outbid',
+            'auctionId', ${auctionId}::text,
+            'outbidUserId', prev."bidderId",
+            'previousAmountCents', prev."amountCents",
+            'newAmountCents', ${bid.amountCents}::int
+          ),
+          now()
+        FROM new_bid, prev
+        WHERE prev."bidderId" <> ${bid.bidderId}
         RETURNING id
       )
       SELECT nb.id, nb."auctionId", nb."bidderId", nb."amountCents", nb."idempotencyKey", nb."createdAt"

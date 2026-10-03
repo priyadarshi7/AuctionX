@@ -324,17 +324,35 @@ export async function handleNotificationEvent(topic: string, _key: string | null
       return;
     }
 
-    case 'auction.moderated':
+    case 'auction.moderated': {
       // An admin took action on the seller's auction; they are told what and
-      // why. (Bidders on a cancelled auction are not notified yet; see
-      // ADR-0040's revisit conditions.)
+      // why.
       await createNotificationIdempotently(messageId, {
         userId: payload.sellerId,
         type: 'AUCTION_MODERATED',
         auctionId: payload.auctionId,
         data: { action: payload.action, reason: payload.reason },
       });
+      // A cancellation also voids everyone's bids, so each distinct bidder is
+      // told. One row per bidder is safe under redelivery: the
+      // (sourceEventId, userId) unique constraint absorbs replays.
+      if (payload.action === 'cancel') {
+        const bidders = await prisma.bid.findMany({
+          where: { auctionId: payload.auctionId, bidderId: { not: payload.sellerId } },
+          distinct: ['bidderId'],
+          select: { bidderId: true },
+        });
+        for (const { bidderId } of bidders) {
+          await createNotificationIdempotently(messageId, {
+            userId: bidderId,
+            type: 'AUCTION_MODERATED',
+            auctionId: payload.auctionId,
+            data: { action: 'cancel', reason: payload.reason, asBidder: true },
+          });
+        }
+      }
       return;
+    }
 
     case 'order.delivered':
       await createNotificationIdempotently(messageId, {

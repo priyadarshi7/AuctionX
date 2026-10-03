@@ -360,6 +360,9 @@ export type PlatformStats = {
   orders: Record<string, number>;
   revenueCents: number;
   needsRefund: number;
+  // When the longest-waiting listing was submitted, so the dashboard can show
+  // how stale the review queue is.
+  oldestPendingReviewAt: Date | null;
 };
 
 // All independent reads, issued concurrently: the cost is one round trip's
@@ -367,7 +370,7 @@ export type PlatformStats = {
 // scale it should move to a cached snapshot rather than be tuned here.
 export async function getPlatformStats(now: Date): Promise<PlatformStats> {
   const day = 24 * 60 * 60 * 1000;
-  const [users, newUsers, restricted, auctionsByStatus, bids, recentBids, ordersByStatus, revenue, needsRefund] =
+  const [users, newUsers, restricted, auctionsByStatus, bids, recentBids, ordersByStatus, revenue, needsRefund, oldestPending] =
     await Promise.all([
       prisma.user.count(),
       prisma.user.count({ where: { createdAt: { gte: new Date(now.getTime() - 7 * day) } } }),
@@ -382,6 +385,7 @@ export async function getPlatformStats(now: Date): Promise<PlatformStats> {
         _sum: { amountCents: true },
       }),
       prisma.order.count({ where: NEEDS_REFUND_WHERE }),
+      prisma.auction.aggregate({ where: { status: 'PENDING_REVIEW' }, _min: { submittedAt: true } }),
     ]);
 
   const toRecord = (rows: { status: string; _count: { _all: number } }[]) =>
@@ -394,5 +398,6 @@ export async function getPlatformStats(now: Date): Promise<PlatformStats> {
     orders: toRecord(ordersByStatus),
     revenueCents: revenue._sum.amountCents ?? 0,
     needsRefund,
+    oldestPendingReviewAt: oldestPending._min.submittedAt,
   };
 }

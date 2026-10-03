@@ -112,8 +112,10 @@ describe('POST /api/v1/auctions/:auctionId/bids', () => {
   it('rejects a bid on an ACTIVE auction whose scheduled end has passed', async () => {
     const seller = await registerAndLogin('seller');
     const bidder = await registerAndLogin('bidder');
-    const auctionId = await createActiveAuction(seller.accessToken, 1000, new Date(Date.now() + 500));
-    await new Promise((resolve) => setTimeout(resolve, 700));
+    const auctionId = await createActiveAuction(seller.accessToken, 1000);
+    // Deterministic: move the scheduled end into the past directly, instead of
+    // racing a sub-second window against the publish and start requests.
+    await prisma.auction.update({ where: { id: auctionId }, data: { endTime: new Date(Date.now() - 1_000) } });
 
     const res = await placeBid(auctionId, bidder.accessToken, 2000);
     expect(res.status).toBe(409);
@@ -308,5 +310,19 @@ describe('POST /api/v1/auctions/:auctionId/bids', () => {
     const highestBid = bidRows.at(-1);
     expect(highestBid).toBeDefined();
     expect(auction.currentPriceCents).toBe(highestBid!.amountCents);
+
+    // Outbid events chain exactly: one per accepted bid after the first, each
+    // naming the bidder of the bid immediately below it. This is what breaks
+    // if the "previous top bid" is read from a stale snapshot.
+    const events = await prisma.outboxEvent.findMany({ where: { key: auctionId, topic: 'bid-events' } });
+    const outbid = events.map((e) => e.payload as { type: string; outbidUserId: string; previousAmountCents: number; newAmountCents: number });
+    expect(outbid).toHaveLength(bidRows.length - 1);
+    for (let i = 1; i < bidRows.length; i += 1) {
+      const event = outbid.find((o) => o.newAmountCents === bidRows[i]!.amountCents);
+      expect(event).toMatchObject({
+        outbidUserId: bidRows[i - 1]!.bidderId,
+        previousAmountCents: bidRows[i - 1]!.amountCents,
+      });
+    }
   });
 });

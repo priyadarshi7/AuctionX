@@ -193,6 +193,20 @@ describe('document upload', () => {
     expect(await headDocumentObject(objectKey)).toBeNull();
   });
 
+  it('enforces the cap exactly under concurrent registrations', async () => {
+    const seller = await createUser('seller');
+    const id = await createDraft(seller.accessToken);
+    const keys = await Promise.all(
+      Array.from({ length: MAX_DOCUMENTS_PER_AUCTION + 2 }, () => presignAndUpload(seller.accessToken, id)),
+    );
+    const results = await Promise.all(
+      keys.map((objectKey) => register(seller.accessToken, id, { objectKey, fileName: 'cert.pdf', contentType: 'application/pdf' })),
+    );
+    expect(results.filter((r) => r.status === 201)).toHaveLength(MAX_DOCUMENTS_PER_AUCTION);
+    expect(results.filter((r) => r.status === 409)).toHaveLength(2);
+    expect(await prisma.auctionDocument.count({ where: { auctionId: id } })).toBe(MAX_DOCUMENTS_PER_AUCTION);
+  });
+
   it(`caps documents at ${MAX_DOCUMENTS_PER_AUCTION} per auction`, async () => {
     const seller = await createUser('seller');
     const id = await createDraft(seller.accessToken);

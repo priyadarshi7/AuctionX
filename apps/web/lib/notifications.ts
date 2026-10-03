@@ -64,6 +64,12 @@ export function describeNotification(notification: Notification): { message: str
         href: `/orders/${notification.orderId}`,
       };
     case 'AUCTION_MODERATED': {
+      if (data.asBidder) {
+        return {
+          message: `An auction you bid on was cancelled by a moderator, so your bid no longer applies${data.reason ? `: ${String(data.reason)}` : '.'}`,
+          href: `/auctions/${notification.auctionId}`,
+        };
+      }
       if (data.action === 'approve') {
         return { message: 'Your listing was approved and is now live.', href: `/auctions/${notification.auctionId}` };
       }

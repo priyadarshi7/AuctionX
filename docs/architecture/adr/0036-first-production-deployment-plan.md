@@ -493,3 +493,12 @@ Revisit Conditions entry on Redpanda's advertised address.
   once the Singapore one (`auctionx-up1r.onrender.com`) has had a bit more
   real usage confirming it's stable — kept alongside it temporarily as a
   rollback option during the cutover.
+
+## Correction (2026-10-04, see ADR-0042)
+
+The merged bid transaction's comments claimed the joined idempotency and
+previous-top-bid reads happened "under the lock". They did not: in READ
+COMMITTED only the locked auctions row is re-read after a lock wait; joined
+tables keep the pre-wait snapshot. The previous-top-bid lookup now lives in the
+write statement (fresh snapshot, lock held), bid createdAt uses
+clock_timestamp(), and a retry that misses its twin is replayed by the service.

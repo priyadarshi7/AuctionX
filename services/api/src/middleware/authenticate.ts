@@ -1,9 +1,10 @@
 import type { NextFunction, Request, Response } from 'express';
 import { TokenExpiredError, JsonWebTokenError } from 'jsonwebtoken';
 import { verifyAccessToken } from '../infrastructure/security/tokens';
+import { isUserBlocked } from '../infrastructure/security/blockedUsers';
 import { UnauthorizedError } from './errors';
 
-export function authenticate(req: Request, _res: Response, next: NextFunction): void {
+export async function authenticate(req: Request, _res: Response, next: NextFunction): Promise<void> {
   const header = req.headers.authorization;
 
   if (!header?.startsWith('Bearer ')) {
@@ -15,6 +16,12 @@ export function authenticate(req: Request, _res: Response, next: NextFunction): 
 
   try {
     const payload = verifyAccessToken(token);
+    // One Redis EXISTS (fails open): a suspended/banned user's still-valid
+    // token is refused immediately rather than after it expires.
+    if (await isUserBlocked(payload.sub)) {
+      next(new UnauthorizedError('ACCOUNT_DISABLED', 'This account is not active'));
+      return;
+    }
     req.user = { id: payload.sub, role: payload.role };
     next();
   } catch (err) {

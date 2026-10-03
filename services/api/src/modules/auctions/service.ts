@@ -360,6 +360,9 @@ export async function startExistingAuction(userId: string, auctionId: string): P
   }
 
   const started = await startAuctionRow(auctionId);
+  if (!started) {
+    throw new ConflictError('AUCTION_NOT_STARTABLE', 'This auction changed state and can no longer be started');
+  }
   await notifyAuctionChanged(auctionId, 'lifecycle');
   return started;
 }
@@ -372,6 +375,9 @@ export async function pauseExistingAuction(userId: string, auctionId: string): P
   }
 
   const paused = await pauseAuctionRow(auctionId);
+  if (!paused) {
+    throw new ConflictError('AUCTION_NOT_PAUSABLE', 'This auction changed state and can no longer be paused');
+  }
   await notifyAuctionChanged(auctionId, 'lifecycle');
   return paused;
 }
@@ -383,7 +389,10 @@ export async function cancelExistingAuction(userId: string, auctionId: string): 
     throw new ConflictError('AUCTION_NOT_CANCELLABLE', 'This auction can no longer be cancelled');
   }
 
-  const cancelled = await cancelAuctionRow(auctionId, !NON_PUBLIC_STATUSES.includes(auction.status));
+  const cancelled = await cancelAuctionRow(auctionId);
+  if (!cancelled) {
+    throw new ConflictError('AUCTION_NOT_CANCELLABLE', 'This auction changed state and can no longer be cancelled');
+  }
   await notifyAuctionChanged(auctionId, 'lifecycle');
   return cancelled;
 }

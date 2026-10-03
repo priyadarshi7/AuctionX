@@ -12,15 +12,15 @@ import { ConflictError, NotFoundError, ValidationError } from '../../middleware/
 import { findAuctionById } from '../auctions/repository';
 import {
   countDocumentsForAuction,
-  createDocument,
+  createDocumentWithinLimit,
   deleteDocumentRow,
   findDocument,
   listDocumentsForAuction,
 } from './repository';
 import type { RegisterDocumentInput } from './schema';
 
-// A soft cap: two simultaneous registrations could both pass the count and
-// land at MAX+1. Harmless (a private, size-capped file), so not worth a lock.
+// Enforced exactly at registration (createDocumentWithinLimit locks the
+// auction row); the earlier checks only fail fast before an upload.
 export const MAX_DOCUMENTS_PER_AUCTION = 5;
 
 export type DocumentView = {
@@ -94,14 +94,25 @@ export async function registerDocument(
   }
 
   try {
-    const doc = await createDocument({
-      auctionId,
-      uploaderId: userId,
-      objectKey: input.objectKey,
-      fileName: input.fileName,
-      contentType: head.contentType ?? input.contentType,
-      sizeBytes: head.sizeBytes,
-    });
+    const doc = await createDocumentWithinLimit(
+      {
+        auctionId,
+        uploaderId: userId,
+        objectKey: input.objectKey,
+        fileName: input.fileName,
+        contentType: head.contentType ?? input.contentType,
+        sizeBytes: head.sizeBytes,
+      },
+      MAX_DOCUMENTS_PER_AUCTION,
+    );
+    if (doc === 'FULL') {
+      await deleteDocumentObject(input.objectKey);
+      throw new ConflictError('TOO_MANY_DOCUMENTS', `An auction can have at most ${MAX_DOCUMENTS_PER_AUCTION} documents`);
+    }
+    if (doc === 'LOCKED') {
+      await deleteDocumentObject(input.objectKey);
+      throw new ConflictError('DOCUMENTS_LOCKED', 'Documents can only be changed while the auction is a draft');
+    }
     return toView(doc);
   } catch (err) {
     // objectKey is unique: registering the same upload twice.

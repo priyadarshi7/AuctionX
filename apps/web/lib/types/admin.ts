@@ -40,6 +40,7 @@ export type PlatformStats = {
   orders: Partial<Record<OrderStatus, number>>;
   revenueCents: number;
   needsRefund: number;
+  oldestPendingReviewAt: string | null;
 };
 
 export type Paged<K extends string, T> = { [P in K]: T[] } & { nextCursor: string | null };

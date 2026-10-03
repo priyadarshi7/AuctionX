@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { notifyAuctionChanged } from '../../infrastructure/realtime/auctionEvents';
 import { getCachedAuction } from '../../infrastructure/redis/auctionCache';
 import { logger } from '../../infrastructure/observability/logger';
-import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../middleware/errors';
+import { AppError, ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../middleware/errors';
 import { findUserById } from '../auth/repository';
 import { getAuctionForViewer, type RequestingUser } from '../auctions/service';
 import {
@@ -138,7 +138,20 @@ export async function placeBid(
   // already accepts for GET /auctions/:id. If it's ever judged too risky
   // for bidding specifically, delete this block — not the cache.
   if (cachedAuction) {
-    assertBidIsAcceptable(cachedAuction, bidderId, input.amountCents);
+    try {
+      assertBidIsAcceptable(cachedAuction, bidderId, input.amountCents);
+    } catch (err) {
+      // The idempotency lookup above ran BEFORE this check. If this is a
+      // retry whose first attempt committed in between, the cache now shows
+      // that attempt's own price and the retry looks "too low". It must be
+      // replayed, not rejected, so look the key up again before giving up.
+      // Costs one read, and only on the rejection path.
+      const replay = await findBidByIdempotencyKey(bidderId, input.idempotencyKey);
+      if (replay) {
+        return { bid: replay, extended: false };
+      }
+      throw err;
+    }
   }
 
   try {
@@ -185,6 +198,18 @@ export async function placeBid(
           'bid.idempotent_replay_after_cross_auction_key_reuse_race',
         );
         return { bid, extended: false };
+      }
+    }
+    // A retry that waited on the row lock behind its OWN first attempt. In
+    // READ COMMITTED the locked row is re-read after the wait (so the price is
+    // the first attempt's), but the idempotency-key join in the locked read
+    // keeps the statement's original snapshot and misses that bid. The retry
+    // therefore fails validation against its own earlier success. Look the
+    // key up once more (fresh snapshot) and replay instead of rejecting.
+    if (err instanceof AppError) {
+      const replay = await findBidByIdempotencyKey(bidderId, input.idempotencyKey);
+      if (replay) {
+        return { bid: replay, extended: false };
       }
     }
     throw err;

@@ -139,17 +139,34 @@ DEPLOY-001 notes below are the history of getting there. Since then:
   migrations), create the PRIVATE bucket `auctionx-docs` in Supabase Storage
   (Public OFF), then deploy. After deploy every new listing needs review.
 - 30-second auction duration option for testing (`lib/duration.ts`).
-- Tests: 261 backend tests pass under `jest --runInBand`.
-  `tests/notifications/notifications.test.ts` cannot run locally: Redpanda
-  advertises `localhost`, Node resolves it to `::1`, Docker resets it (ADR-0036
-  Revisit Conditions has the one-line fix).
+- **HARDEN-001 (ADR-0042), 2026-10-04:** never-live cancelled listings no
+  longer leak into Browse; admin list hides drafts and admin Cancel is limited
+  to live auctions; seller start/pause/cancel are guarded UPDATEs; banned
+  users' tokens are refused immediately (Redis `user:blocked:{id}` marker,
+  fails open); bidders are notified on admin cancel; document cap is exact;
+  dashboard shows how long the oldest pending review has waited. Also fixed a
+  REAL bid-path bug: under READ COMMITTED the merged locked read used a stale
+  snapshot for the idempotency join and the previous-top-bid lookup (the
+  earlier "timing-sensitive" test flake); previous top bid is now computed in
+  the write statement and bid createdAt uses clock_timestamp().
+- Tests: 267 backend tests pass under `jest --runInBand` (web typecheck and
+  lint clean). Local Redpanda now advertises `127.0.0.1:9092` (recreate the
+  container: `docker compose up -d --force-recreate redpanda`) so
+  `tests/notifications/notifications.test.ts` should run again; not yet
+  re-verified.
 
-**Known open items:** frontend has no automated tests and the admin/order UI
-has not been exercised in a browser; refunds are manual; bidders are not told
-when an admin cancels an auction; the old Oregon Render service still exists;
-real Stripe (replacing the mock provider) is not started; Windows gotcha:
-Prisma `generate` fails with EPERM while `npm run dev` is running (types still
-update; stop the server only if the engine file itself must change).
+**Known open items (next session starts here):**
+- Real Stripe (test mode) to replace the mock provider, with webhooks and
+  automatic refunds (refunds are manual today; the dashboard flags them).
+- Playwright browser tests for bid/order/admin/review; the new UI has been
+  exercised by hand only.
+- Seller-initiated cancel of an auction that has bids does not notify bidders.
+- Review queue has an age indicator but no emails/escalation.
+- Documents: orphaned objects after account deletion, no virus scan.
+- Delete the old Oregon Render service (your account, not automatable).
+- Windows gotcha: Prisma `generate` fails with EPERM while `npm run dev` is
+  running (types still update; stop the server only if the engine file itself
+  must change).
 
 ## Current Task
 

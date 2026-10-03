@@ -26,6 +26,11 @@ function StatCard({ label, value, hint, href }: { label: string; value: string |
   );
 }
 
+// Module-level so the clock read is not an impure call during render.
+function hoursSince(iso: string): number {
+  return Math.floor((Date.now() - new Date(iso).getTime()) / 3_600_000);
+}
+
 export default function AdminDashboardPage() {
   const accessToken = useAuthStore((s) => s.accessToken)!;
 
@@ -43,6 +48,9 @@ export default function AdminDashboardPage() {
   const live = s?.auctions.ACTIVE ?? 0;
   const pendingOrders = s?.orders.PENDING_PAYMENT ?? 0;
   const awaitingReview = s?.auctions.PENDING_REVIEW ?? 0;
+  const oldestHours = s?.oldestPendingReviewAt ? hoursSince(s.oldestPendingReviewAt) : 0;
+  const queueIsStale = oldestHours >= 24;
+  const oldestLabel = oldestHours >= 24 ? `${Math.floor(oldestHours / 24)}d` : oldestHours >= 1 ? `${oldestHours}h` : 'under an hour';
 
   return (
     <>
@@ -52,9 +60,9 @@ export default function AdminDashboardPage() {
 
       {awaitingReview > 0 && (
         <div className="mb-6">
-          <Notice tone="info">
+          <Notice tone={queueIsStale ? 'error' : 'info'}>
             <strong>{awaitingReview}</strong> {awaitingReview === 1 ? 'listing is' : 'listings are'} waiting for your
-            review.{' '}
+            review. The oldest has waited {oldestLabel}.{queueIsStale && ' Sellers are waiting a long time.'}{' '}
             <Link href="/admin/auctions?status=PENDING_REVIEW" className="font-semibold underline underline-offset-4">
               Open the review queue
             </Link>
