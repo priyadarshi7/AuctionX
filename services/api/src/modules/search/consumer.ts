@@ -1,5 +1,5 @@
 import type { Consumer } from 'kafkajs';
-import { findAuctionById } from '../auctions/repository';
+import { findAuctionById, isNeverLive } from '../auctions/repository';
 import { logger } from '../../infrastructure/observability/logger';
 import { env } from '../../config/env';
 import { createConsumer, runConsumer, type MessageId } from '../../infrastructure/kafka/consumer';
@@ -60,7 +60,7 @@ export async function handleSearchEvent(topic: string, _key: string | null, payl
   // — must never be searchable.
   // A missing row can't happen today (no delete endpoint exists), but
   // `deleteAuctionDocument` is a safe no-op either way (`ignore: [404]`).
-  if (!auction || auction.status === 'DRAFT' || auction.status === 'PENDING_REVIEW') {
+  if (!auction || auction.status === 'DRAFT' || auction.status === 'PENDING_REVIEW' || isNeverLive(auction)) {
     await deleteAuctionDocument(payload.auctionId);
     return;
   }

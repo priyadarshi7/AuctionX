@@ -172,7 +172,9 @@ export async function listAuctionsForAdmin(
   after?: Cursor,
 ): Promise<{ rows: AdminAuctionRow[]; hasMore: boolean }> {
   const where: Prisma.AuctionWhereInput = {
-    ...(filters.status ? { status: filters.status } : {}),
+    // Drafts are the seller's private work in progress; an admin only sees a
+    // listing once it has been submitted (PENDING_REVIEW) or gone live.
+    status: filters.status && filters.status !== 'DRAFT' ? filters.status : { not: 'DRAFT' as const },
     ...(filters.search ? { title: { contains: filters.search, mode: 'insensitive' } } : {}),
     ...keysetWhere(after),
   };
@@ -189,13 +191,14 @@ export async function listAuctionsForAdmin(
 export type ModerationAction = 'pause' | 'resume' | 'cancel' | 'approve' | 'reject';
 
 // Which states each action may start from, and where it lands. Cancel
-// mirrors the seller-facing rule (any non-terminal state); ENDED and
-// CANCELLED auctions are final and cannot be moderated, since an ENDED one
-// may already have an Order behind it.
+// applies only to auctions that are (or were) live; a pending listing is
+// decided with approve/reject instead. ENDED and CANCELLED auctions are
+// final and cannot be moderated, since an ENDED one may already have an
+// Order behind it.
 const MODERATION_RULES: Record<ModerationAction, { from: AuctionStatus[]; to: AuctionStatus }> = {
   pause: { from: ['ACTIVE'], to: 'PAUSED' },
   resume: { from: ['PAUSED'], to: 'ACTIVE' },
-  cancel: { from: ['DRAFT', 'PENDING_REVIEW', 'PUBLISHED', 'ACTIVE', 'PAUSED'], to: 'CANCELLED' },
+  cancel: { from: ['PUBLISHED', 'ACTIVE', 'PAUSED'], to: 'CANCELLED' },
   // Review decisions (ADR-0041). Approve goes LIVE, with the clock starting
   // now from the duration the seller asked for; reject sends it back to
   // DRAFT with the admin's reason for the seller to fix and resubmit.

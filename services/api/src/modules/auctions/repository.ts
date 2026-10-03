@@ -65,7 +65,16 @@ export function findAuctionById(id: string): Promise<Auction | null> {
   return prisma.auction.findUnique({ where: { id } });
 }
 
+// A listing cancelled before it ever went live (from DRAFT or PENDING_REVIEW)
+// is cancelled with startTime cleared, and every path that goes live sets
+// startTime. So "CANCELLED with no startTime" means "never public": it must
+// not appear in Browse, search or to non-owners.
+export function isNeverLive(a: { status: AuctionStatus; startTime: Date | null }): boolean {
+  return a.status === 'CANCELLED' && a.startTime === null;
+}
+
 export type AuctionListFilters = {
+  excludeNeverLive?: boolean;
   status?: AuctionStatus | { not: AuctionStatus } | { notIn: AuctionStatus[] };
   category?: AuctionCategory;
   sellerId?: string;
@@ -93,6 +102,7 @@ export async function listAuctions(
 ): Promise<{ rows: Auction[]; hasMore: boolean }> {
   const where: Prisma.AuctionWhereInput = {
     ...(filters.status !== undefined ? { status: filters.status } : {}),
+    ...(filters.excludeNeverLive ? { NOT: { status: 'CANCELLED' as const, startTime: null } } : {}),
     ...(filters.category !== undefined ? { category: filters.category } : {}),
     ...(filters.sellerId !== undefined ? { sellerId: filters.sellerId } : {}),
     ...(after
@@ -233,11 +243,11 @@ export function pauseAuctionRow(id: string): Promise<Auction> {
 
 // endedAt records the real end moment, distinct from the scheduled endTime
 // (ADR-0007) — a cancellation is precisely the case where they diverge.
-export function cancelAuctionRow(id: string): Promise<Auction> {
+export function cancelAuctionRow(id: string, wasLive: boolean): Promise<Auction> {
   return prisma.$transaction(async (tx) => {
     const auction = await tx.auction.update({
       where: { id },
-      data: { status: 'CANCELLED', endedAt: new Date() },
+      data: { status: 'CANCELLED', endedAt: new Date(), ...(wasLive ? {} : { startTime: null }) },
     });
     await publishReindexEvent(tx, id);
     return auction;

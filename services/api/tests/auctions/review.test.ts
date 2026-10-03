@@ -318,14 +318,35 @@ describe('admin decisions', () => {
     expect(final).toBe(approve.status === 200 ? 'ACTIVE' : 'DRAFT');
   });
 
-  it('an admin can cancel a pending listing', async () => {
+  it('an admin cannot cancel a pending listing (reject is the way) and drafts are not in the admin list', async () => {
     const admin = await createAdmin();
     const seller = await createUser('seller');
-    const id = await createDraft(seller.accessToken);
-    await submit(seller.accessToken, id);
-    const res = await moderate(admin.accessToken, id, { action: 'cancel', reason: 'Prohibited item' });
-    expect(res.status).toBe(200);
-    expect(res.body.auction.status).toBe('CANCELLED');
+    const draft = await createDraft(seller.accessToken);
+    const pending = await createDraft(seller.accessToken);
+    await submit(seller.accessToken, pending);
+    const res = await moderate(admin.accessToken, pending, { action: 'cancel', reason: 'Prohibited item' });
+    expect(res.status).toBe(409);
+    const list = await request(app).get('/api/v1/admin/auctions?limit=50').set('Authorization', `Bearer ${admin.accessToken}`);
+    const ids = list.body.auctions.map((a: { id: string }) => a.id);
+    expect(ids).toContain(pending);
+    expect(ids).not.toContain(draft);
+  });
+
+  it('a listing cancelled before it ever went live never appears in Browse or to the public', async () => {
+    const seller = await createUser('seller');
+    const buyer = await createUser('buyer');
+    const bySeller = await createDraft(seller.accessToken);
+    await submit(seller.accessToken, bySeller);
+    await request(app).post(`/api/v1/auctions/${bySeller}/cancel`).set('Authorization', `Bearer ${seller.accessToken}`);
+
+    for (const id of [bySeller]) {
+      const list = await request(app).get(`/api/v1/auctions?sellerId=${seller.id}`);
+      expect(list.body.auctions.map((a: { id: string }) => a.id)).not.toContain(id);
+      const publicGet = await request(app).get(`/api/v1/auctions/${id}`).set('Authorization', `Bearer ${buyer.accessToken}`);
+      expect(publicGet.status).toBe(404);
+      const ownerGet = await request(app).get(`/api/v1/auctions/${id}`).set('Authorization', `Bearer ${seller.accessToken}`);
+      expect(ownerGet.status).toBe(200);
+    }
   });
 });
 

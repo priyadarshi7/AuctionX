@@ -173,7 +173,7 @@ describe('POST /api/v1/admin/auctions/:id/moderate', () => {
     expect(res.body.auction.endedAt).toEqual(expect.any(String));
   });
 
-  it('can cancel a DRAFT, but refuses invalid transitions with a 409', async () => {
+  it('cannot touch a DRAFT at all, and refuses repeat cancels with a 409', async () => {
     const admin = await createAdmin();
     const seller = await createUser('seller');
     const draft = await createAuction(seller.accessToken, { start: false });
@@ -184,11 +184,16 @@ describe('POST /api/v1/admin/auctions/:id/moderate', () => {
     const resumeDraft = await moderate(admin.accessToken, draft, { action: 'resume' });
     expect(resumeDraft.status).toBe(409);
 
-    expect((await moderate(admin.accessToken, draft, { action: 'cancel', reason: 'Abandoned' })).status).toBe(200);
-    const again = await moderate(admin.accessToken, draft, { action: 'cancel', reason: 'Again' });
+    const cancelDraft = await moderate(admin.accessToken, draft, { action: 'cancel', reason: 'Abandoned' });
+    expect(cancelDraft.status).toBe(409);
+    expect(cancelDraft.body.error.code).toBe('AUCTION_NOT_CANCELLABLE');
+
+    const live = await createAuction(seller.accessToken);
+    expect((await moderate(admin.accessToken, live, { action: 'cancel', reason: 'Abandoned' })).status).toBe(200);
+    const again = await moderate(admin.accessToken, live, { action: 'cancel', reason: 'Again' });
     expect(again.status).toBe(409);
     expect(again.body.error.code).toBe('AUCTION_NOT_CANCELLABLE');
-    expect(await prisma.adminAuditLog.count({ where: { targetId: draft } })).toBe(1);
+    expect(await prisma.adminAuditLog.count({ where: { targetId: { in: [draft, live] } } })).toBe(1);
   });
 
   it('refuses to cancel an ENDED auction that already has an order', async () => {
@@ -260,7 +265,7 @@ describe('POST /api/v1/admin/auctions/:id/moderate', () => {
 });
 
 describe('GET /api/v1/admin/auctions', () => {
-  it('lists auctions in every status with seller info and bid count, and filters', async () => {
+  it('lists submitted and live auctions with seller info and bid count, but never drafts', async () => {
     const admin = await createAdmin();
     const seller = await createUser('lister');
     const draft = await createAuction(seller.accessToken, { start: false });
@@ -269,13 +274,14 @@ describe('GET /api/v1/admin/auctions', () => {
     const all = await getAs(admin.accessToken, '/api/v1/admin/auctions?limit=100');
     expect(all.status).toBe(200);
     const ids = all.body.auctions.map((a: { id: string }) => a.id);
-    expect(ids).toEqual(expect.arrayContaining([draft, live]));
+    expect(ids).toContain(live);
+    expect(ids).not.toContain(draft);
     const liveRow = all.body.auctions.find((a: { id: string }) => a.id === live);
     expect(liveRow).toMatchObject({ sellerEmail: expect.stringContaining('lister'), bidCount: 0, status: 'ACTIVE' });
 
     const drafts = await getAs(admin.accessToken, '/api/v1/admin/auctions?status=DRAFT&search=Moderation&limit=100');
-    expect(drafts.body.auctions.map((a: { id: string }) => a.id)).toContain(draft);
-    expect(drafts.body.auctions.every((a: { status: string }) => a.status === 'DRAFT')).toBe(true);
+    expect(drafts.body.auctions.map((a: { id: string }) => a.id)).not.toContain(draft);
+    expect(drafts.body.auctions.every((a: { status: string }) => a.status !== 'DRAFT')).toBe(true);
   });
 });
 

@@ -10,6 +10,7 @@ import {
   cancelAuctionRow,
   createAuction,
   findAuctionById,
+  isNeverLive,
   listAuctions,
   pauseAuctionRow,
   publishAuctionRow,
@@ -138,6 +139,7 @@ export async function listPublicAuctions(
   const filters: AuctionListFilters = {
     ...(query.category !== undefined ? { category: query.category } : {}),
     ...(query.sellerId !== undefined ? { sellerId: query.sellerId } : {}),
+    ...(!allowDrafts ? { excludeNeverLive: true } : {}),
     ...(query.status !== undefined
       ? { status: query.status }
       : !allowDrafts
@@ -179,7 +181,10 @@ export async function getAuctionForViewer(user: RequestingUser, id: string): Pro
   // sensitive), it's simply not revealing that an unpublished listing with
   // this id exists yet, consistent with keeping DRAFT invisible everywhere
   // else in this module.
-  if (NON_PUBLIC_STATUSES.includes(auction.status) && !canSeeDraftsFor(user, auction.sellerId)) {
+  if (
+    (NON_PUBLIC_STATUSES.includes(auction.status) || isNeverLive(auction)) &&
+    !canSeeDraftsFor(user, auction.sellerId)
+  ) {
     throw new NotFoundError('Auction not found');
   }
 
@@ -378,7 +383,7 @@ export async function cancelExistingAuction(userId: string, auctionId: string): 
     throw new ConflictError('AUCTION_NOT_CANCELLABLE', 'This auction can no longer be cancelled');
   }
 
-  const cancelled = await cancelAuctionRow(auctionId);
+  const cancelled = await cancelAuctionRow(auctionId, !NON_PUBLIC_STATUSES.includes(auction.status));
   await notifyAuctionChanged(auctionId, 'lifecycle');
   return cancelled;
 }

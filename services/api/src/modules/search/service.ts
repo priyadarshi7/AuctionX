@@ -42,7 +42,7 @@ export async function reindexAllAuctions(): Promise<{ indexed: number }> {
   let indexed = 0;
   let after: Parameters<typeof listAuctions>[2];
   for (;;) {
-    const { rows, hasMore } = await listAuctions({ status: { notIn: ['DRAFT', 'PENDING_REVIEW'] } }, 200, after);
+    const { rows, hasMore } = await listAuctions({ status: { notIn: ['DRAFT', 'PENDING_REVIEW'] }, excludeNeverLive: true }, 200, after);
     for (const auction of rows) {
       await upsertAuctionDocument(auction);
       indexed += 1;

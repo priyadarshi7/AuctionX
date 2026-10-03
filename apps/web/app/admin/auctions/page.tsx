@@ -22,7 +22,7 @@ import { AuctionStatusPill } from '../../components/ui/StatusPill';
 import { DocumentsPanel } from '../../auctions/[id]/DocumentsPanel';
 import { ReasonForm } from '../ReasonForm';
 
-const STATUSES: AuctionStatus[] = ['PENDING_REVIEW', 'DRAFT', 'PUBLISHED', 'ACTIVE', 'PAUSED', 'ENDED', 'CANCELLED'];
+const STATUSES: AuctionStatus[] = ['PENDING_REVIEW', 'PUBLISHED', 'ACTIVE', 'PAUSED', 'ENDED', 'CANCELLED'];
 
 // Mirrors the server's allowed source states (admin/repository.ts's
 // MODERATION_RULES). Only used to decide which buttons to show; the server
@@ -30,7 +30,7 @@ const STATUSES: AuctionStatus[] = ['PENDING_REVIEW', 'DRAFT', 'PUBLISHED', 'ACTI
 // action then fails with a clear message.
 const CAN_PAUSE: AuctionStatus[] = ['ACTIVE'];
 const CAN_RESUME: AuctionStatus[] = ['PAUSED'];
-const CAN_CANCEL: AuctionStatus[] = ['DRAFT', 'PENDING_REVIEW', 'PUBLISHED', 'ACTIVE', 'PAUSED'];
+const CAN_CANCEL: AuctionStatus[] = ['PUBLISHED', 'ACTIVE', 'PAUSED'];
 
 const VERB: Record<ModerationAction, { prompt: string; confirm: string }> = {
   pause: { prompt: 'Why are you pausing this auction? The seller will be told.', confirm: 'Pause auction' },
