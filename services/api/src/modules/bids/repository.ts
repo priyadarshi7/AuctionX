@@ -1,23 +1,31 @@
-import type { AuctionStatus, Bid, Prisma } from '@prisma/client';
+import type { AuctionStatus, Bid } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { prisma } from '../../infrastructure/database/prisma';
-import { createOutboxEventInTx } from '../../infrastructure/outbox/repository';
 import { SEARCH_EVENTS_TOPIC } from '../../infrastructure/kafka/topics';
 import { computeExtendedEndTime } from './antiSniping';
 
-// Phase 9 (ADR-0029): every accepted bid changes currentPriceCents, which
-// the search index needs to reflect — unlike 'bid.outbid' below, this must
-// fire for EVERY genuine new bid, including the very first one on an
-// auction (which has no previous bidder to outbid, so that event is
-// skipped entirely) and a bidder re-outbidding themselves (also skipped
-// below). Dedicated, test-scoped topic (SEARCH_EVENTS_TOPIC, ADR-0031) —
-// see modules/search/consumer.ts's comment for why this can't share
-// 'bid-events'/'auction-events' with modules/notifications/consumer.ts.
-function publishReindexEvent(tx: Prisma.TransactionClient, auctionId: string): Promise<unknown> {
-  return createOutboxEventInTx(tx, {
-    topic: SEARCH_EVENTS_TOPIC,
-    key: auctionId,
-    payload: { type: 'auction.reindex', auctionId },
-  });
+// Reconstructs a full Bid from a raw query's flat, prefixed columns, or
+// null when the LEFT JOIN that produced them matched nothing. Used for
+// both the idempotency-replay column set and the previous-highest-bid
+// column set below — same shape, different prefix, so one helper instead
+// of writing this mapping out twice.
+function bidFromRawColumns(
+  id: string | null,
+  auctionId: string | null,
+  bidderId: string | null,
+  amountCents: number | null,
+  idempotencyKey: string | null,
+  createdAt: Date | null,
+): Bid | null {
+  if (!id) return null;
+  return {
+    id,
+    auctionId: auctionId as string,
+    bidderId: bidderId as string,
+    amountCents: amountCents as number,
+    idempotencyKey: idempotencyKey as string,
+    createdAt: createdAt as Date,
+  };
 }
 
 export function findBidByIdempotencyKey(bidderId: string, idempotencyKey: string): Promise<Bid | null> {
@@ -52,6 +60,25 @@ export type NewBidData = { bidderId: string; amountCents: number; idempotencyKey
 
 export type PlaceBidResult = { bid: Bid; extended: boolean };
 
+type LockedReadRow = {
+  auctionId: string;
+  auctionSellerId: string;
+  auctionStatus: AuctionStatus;
+  auctionCurrentPriceCents: number;
+  auctionEndTime: Date | null;
+  existingBidId: string | null;
+  existingBidAuctionId: string | null;
+  existingBidBidderId: string | null;
+  existingBidAmountCents: number | null;
+  existingBidIdempotencyKey: string | null;
+  existingBidCreatedAt: Date | null;
+  prevBidId: string | null;
+  prevBidBidderId: string | null;
+  prevBidAmountCents: number | null;
+  prevBidIdempotencyKey: string | null;
+  prevBidCreatedAt: Date | null;
+};
+
 // This is Section 10's bid pipeline made real, as ONE Postgres transaction:
 // lock the auction row, validate against what the lock guarantees is
 // current, persist the bid, update the auction (price, and — Section 18 —
@@ -65,39 +92,77 @@ export type PlaceBidResult = { bid: Bid; extended: boolean };
 // transaction could still change before this one commits, reopening the
 // exact race this function exists to close. It receives `undefined` when
 // the auction doesn't exist and is expected to throw in that case too.
+//
+// ADR-0036 latency addendum: the transaction body is exactly two round
+// trips — one locked read, one combined write — down from up to seven
+// sequential statements. WHAT is locked, read, validated and written is
+// unchanged; only how many network hops it takes.
 export async function placeBidTransactionally(
   auctionId: string,
   bid: NewBidData,
   validate: (auction: LockedAuctionRow | undefined) => void,
 ): Promise<PlaceBidResult> {
   return prisma.$transaction(async (tx) => {
-    // Prisma's query builder has no row-locking API, so this step is
-    // necessarily raw SQL. Every other concurrent bid attempt on THIS SAME
-    // auction row blocks here until this transaction commits or rolls
-    // back; concurrent attempts on OTHER auctions are entirely unaffected
-    // (a row lock, not a table lock).
-    const rows = await tx.$queryRaw<LockedAuctionRow[]>`
-      SELECT id, "sellerId", status, "currentPriceCents", "endTime"
-      FROM auctions
-      WHERE id = ${auctionId}
-      FOR UPDATE
+    // Round trip 1 of 2: the row lock, the post-lock idempotency re-check,
+    // and the previous-highest-bid lookup, as one query. `FOR UPDATE OF a`
+    // locks only the auctions row — the same lock as before — not whatever
+    // rows the joins match. Both joined reads still happen after/under that
+    // lock, which is what keeps their old correctness guarantees:
+    //
+    // - Idempotency re-check: a request that loses the race for the lock
+    //   must see its twin's (same key) already-committed insert here,
+    //   rather than validating against a price that twin already raised
+    //   and wrongly rejecting a legitimate retry as "too low".
+    // - Previous highest bid: who THIS bid is about to outbid must be read
+    //   under the same lock as the insert, or another bid could land in
+    //   between and make the answer refer to the wrong bid.
+    const rows = await tx.$queryRaw<LockedReadRow[]>`
+      SELECT
+        a.id AS "auctionId",
+        a."sellerId" AS "auctionSellerId",
+        a.status AS "auctionStatus",
+        a."currentPriceCents" AS "auctionCurrentPriceCents",
+        a."endTime" AS "auctionEndTime",
+        e.id AS "existingBidId",
+        e."auctionId" AS "existingBidAuctionId",
+        e."bidderId" AS "existingBidBidderId",
+        e."amountCents" AS "existingBidAmountCents",
+        e."idempotencyKey" AS "existingBidIdempotencyKey",
+        e."createdAt" AS "existingBidCreatedAt",
+        p.id AS "prevBidId",
+        p."bidderId" AS "prevBidBidderId",
+        p."amountCents" AS "prevBidAmountCents",
+        p."idempotencyKey" AS "prevBidIdempotencyKey",
+        p."createdAt" AS "prevBidCreatedAt"
+      FROM auctions a
+      LEFT JOIN bids e
+        ON e."bidderId" = ${bid.bidderId} AND e."idempotencyKey" = ${bid.idempotencyKey}
+      LEFT JOIN LATERAL (
+        SELECT id, "bidderId", "amountCents", "idempotencyKey", "createdAt"
+        FROM bids
+        WHERE "auctionId" = a.id
+        ORDER BY "createdAt" DESC
+        LIMIT 1
+      ) p ON true
+      WHERE a.id = ${auctionId}
+      FOR UPDATE OF a
     `;
+    const row = rows[0];
 
-    // Re-check idempotency AFTER acquiring the lock, not just before
-    // entering this transaction. Without this second check, a request that
-    // loses the race for the lock would validate its bid against the
-    // auction's price AFTER its own twin request (same idempotency key)
-    // already raised that price — rejecting a legitimate retry as "too low"
-    // instead of replaying the original result. This is what actually
-    // closes that race: every bid placement on this auction serializes
-    // behind this same row lock, so whichever request acquires it second is
-    // GUARANTEED to see any sibling's already-committed insert here, before
-    // running price validation against now-stale expectations.
-    const existing = await tx.bid.findUnique({
-      where: {
-        bidderId_idempotencyKey: { bidderId: bid.bidderId, idempotencyKey: bid.idempotencyKey },
-      },
-    });
+    // Scoped to (bidderId, idempotencyKey) only — NOT also to this auction
+    // — so `existingBidAuctionId` can legitimately be a DIFFERENT auction's
+    // id (the cross-auction key-reuse case service.ts's catch block
+    // documents). That's why it's read off the row rather than assumed.
+    const existing = row
+      ? bidFromRawColumns(
+          row.existingBidId,
+          row.existingBidAuctionId,
+          row.existingBidBidderId,
+          row.existingBidAmountCents,
+          row.existingBidIdempotencyKey,
+          row.existingBidCreatedAt,
+        )
+      : null;
     if (existing) {
       // A replay describes something that already happened — it never
       // re-triggers a fresh extension of its own, and (same reasoning)
@@ -105,74 +170,107 @@ export async function placeBidTransactionally(
       return { bid: existing, extended: false };
     }
 
-    validate(rows[0]);
+    const lockedAuction: LockedAuctionRow | undefined = row
+      ? {
+          id: row.auctionId,
+          sellerId: row.auctionSellerId,
+          status: row.auctionStatus,
+          currentPriceCents: row.auctionCurrentPriceCents,
+          endTime: row.auctionEndTime,
+        }
+      : undefined;
+    validate(lockedAuction);
     // validate() throws for every invalid case, including a missing row —
     // reaching this line means it's safe to use non-null below.
-    const auction = rows[0] as LockedAuctionRow;
+    const auction = lockedAuction as LockedAuctionRow;
 
-    // Read BEFORE inserting the new bid, under the same lock — this is who
-    // this specific bid is about to outbid. Doing this after insert (or
-    // after commit) would be a real race: another bid could land in
-    // between and make "the 2nd-highest bid" answer a different question
-    // than "who did THIS bid just beat."
-    const previousHighestBid = await tx.bid.findFirst({
-      where: { auctionId },
-      orderBy: { createdAt: 'desc' },
-    });
+    const previousHighestBid = bidFromRawColumns(
+      row?.prevBidId ?? null,
+      auctionId,
+      row?.prevBidBidderId ?? null,
+      row?.prevBidAmountCents ?? null,
+      row?.prevBidIdempotencyKey ?? null,
+      row?.prevBidCreatedAt ?? null,
+    );
 
-    const created = await tx.bid.create({
-      data: {
-        auctionId,
-        bidderId: bid.bidderId,
-        amountCents: bid.amountCents,
-        idempotencyKey: bid.idempotencyKey,
-      },
-    });
-
-    // Anti-sniping (Section 18): computed and applied in the SAME
-    // transaction, under the SAME lock, as accepting the bid itself — "this
-    // must be handled atomically" means there must be no window where the
-    // bid is accepted but the extension hasn't happened yet (or vice
-    // versa), and there isn't one, because both writes commit together.
+    // Anti-sniping (Section 18): computed from the locked read and written
+    // in the same transaction as the bid itself, so there's no window where
+    // the bid is accepted but the extension hasn't happened (or vice versa).
     const extendedEndTime = auction.endTime ? computeExtendedEndTime(auction.endTime, new Date()) : null;
+    // Always written, even when unchanged — re-writing the same value is a
+    // no-op, and one unconditional SET is simpler than a conditional SQL
+    // fragment.
+    const finalEndTime = extendedEndTime ?? auction.endTime;
 
-    await tx.auction.update({
-      where: { id: auctionId },
-      data: {
-        currentPriceCents: bid.amountCents,
-        ...(extendedEndTime ? { endTime: extendedEndTime } : {}),
-      },
+    // No outbid event for an auction's first bid, or for a bidder
+    // immediately re-outbidding themselves — nothing useful to tell them.
+    // Keyed by auctionId (Section 15): outbid events for one auction must
+    // be consumed in the order they happened.
+    const shouldPublishOutbid = previousHighestBid !== null && previousHighestBid.bidderId !== bid.bidderId;
+
+    // Raw SQL bypasses Prisma's client-side @default(uuid()) — the id
+    // columns have no database default — so ids are generated here.
+    const newBidId = randomUUID();
+    const reindexEventId = randomUUID();
+    const outbidEventId = randomUUID();
+    // Phase 9 (ADR-0029): every accepted bid changes currentPriceCents,
+    // which the search index must reflect, on its own test-scoped topic
+    // (SEARCH_EVENTS_TOPIC, ADR-0031).
+    const reindexPayload = JSON.stringify({ type: 'auction.reindex', auctionId });
+    // Via the Outbox (ADR-0027), not a direct Notification insert — the
+    // notifications consumer does that work asynchronously, off this
+    // transaction (Section 64).
+    const outbidPayload = JSON.stringify({
+      type: 'bid.outbid',
+      auctionId,
+      outbidUserId: previousHighestBid?.bidderId ?? null,
+      previousAmountCents: previousHighestBid?.amountCents ?? null,
+      newAmountCents: bid.amountCents,
     });
-    await publishReindexEvent(tx, auctionId);
 
-    // No event for the auction's own seller placing the first bid against
-    // themselves (impossible anyway — assertBidIsAcceptable blocks shill
-    // bidding) or for a bidder immediately re-outbidding themselves
-    // (bidderId === previousHighestBid.bidderId — nothing useful to tell
-    // them).
+    // Round trip 2 of 2: INSERT the bid, UPDATE the auction, INSERT the
+    // reindex outbox event, and conditionally INSERT the outbid outbox event
+    // — as ONE statement, using Postgres's data-modifying CTEs. Each INSERT
+    // reads the previous step's RETURNING output as its FROM source (the
+    // same pattern as the Postgres manual's own "move rows between tables"
+    // example), and the final SELECT joins every CTE, so every write is in
+    // the statement's dependency graph and is guaranteed to execute.
     //
-    // Published via the Outbox (ADR-0027), not a direct Notification
-    // insert — this keeps the bid-placement transaction (Section 64's
-    // "critical path must stay fast") from doing the notification's own
-    // work; a consumer (modules/notifications/consumer.ts) does that
-    // asynchronously, off this transaction entirely. Keyed by auctionId,
-    // not bidderId — ordering matters per-auction (Section 15), since two
-    // outbid events for the same auction must be processed in the order
-    // they happened.
-    if (previousHighestBid && previousHighestBid.bidderId !== bid.bidderId) {
-      await createOutboxEventInTx(tx, {
-        topic: 'bid-events',
-        key: auctionId,
-        payload: {
-          type: 'bid.outbid',
-          auctionId,
-          outbidUserId: previousHighestBid.bidderId,
-          previousAmountCents: previousHighestBid.amountCents,
-          newAmountCents: bid.amountCents,
-        },
-      });
-    }
+    // new_bid's INSERT ... VALUES always yields exactly one row, and every
+    // other CTE yields at most one, so the LEFT JOIN ... ON true chain can
+    // neither drop nor multiply the result: exactly one row comes back.
+    const rowsWritten = await tx.$queryRaw<Bid[]>`
+      WITH new_bid AS (
+        INSERT INTO bids (id, "auctionId", "bidderId", "amountCents", "idempotencyKey", "createdAt")
+        VALUES (${newBidId}, ${auctionId}, ${bid.bidderId}, ${bid.amountCents}, ${bid.idempotencyKey}, now())
+        RETURNING id, "auctionId", "bidderId", "amountCents", "idempotencyKey", "createdAt"
+      ),
+      updated_auction AS (
+        UPDATE auctions
+        SET "currentPriceCents" = ${bid.amountCents}, "endTime" = ${finalEndTime}
+        WHERE id = ${auctionId}
+        RETURNING id
+      ),
+      reindex_event AS (
+        INSERT INTO outbox_events (id, topic, key, payload, "createdAt")
+        SELECT ${reindexEventId}, ${SEARCH_EVENTS_TOPIC}, ${auctionId}, ${reindexPayload}::jsonb, now()
+        FROM updated_auction
+        RETURNING id
+      ),
+      outbid_event AS (
+        INSERT INTO outbox_events (id, topic, key, payload, "createdAt")
+        SELECT ${outbidEventId}, 'bid-events', ${auctionId}, ${outbidPayload}::jsonb, now()
+        FROM new_bid
+        WHERE ${shouldPublishOutbid}
+        RETURNING id
+      )
+      SELECT nb.id, nb."auctionId", nb."bidderId", nb."amountCents", nb."idempotencyKey", nb."createdAt"
+      FROM new_bid nb
+      LEFT JOIN updated_auction ua ON true
+      LEFT JOIN reindex_event re ON true
+      LEFT JOIN outbid_event oe ON true
+    `;
 
-    return { bid: created, extended: extendedEndTime !== null };
+    return { bid: rowsWritten[0] as Bid, extended: extendedEndTime !== null };
   });
 }

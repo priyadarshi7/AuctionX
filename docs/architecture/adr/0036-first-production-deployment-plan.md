@@ -383,11 +383,72 @@ sub-second"). Measured rather than guessed at, per Section 62:
   correctly, redeploy — `NEXT_PUBLIC_` values are baked in at build time,
   so the env var change alone does nothing).
 
+## Addendum (2026-10-03): cutting the bid path's round trips
+
+After the Singapore move, bids still measured ~1.2-2.2s end to end (5
+live bids, curl from outside Render, avg ~1.7s), and parallelizing the two
+pre-transaction lookups (one saved round trip, ~275ms) wasn't measurable
+through that ~1s run-to-run noise. The user's own observation narrowed it
+further: reads felt fast, the *submit* (the write) felt as slow as before.
+At ~275ms per Singapore<->Tokyo round trip, the round-trip COUNT is the
+whole cost, so the fix is fewer round trips, not faster code:
+
+- **Transaction body: up to 7 sequential statements -> 2.**
+  `placeBidTransactionally` (bids/repository.ts) is now one locked read
+  (`SELECT ... FOR UPDATE OF a`, with LEFT JOINs pulling the idempotency
+  re-check and the previous highest bid into the same query) and one write
+  (bid INSERT + auction UPDATE + reindex outbox INSERT + conditional outbid
+  outbox INSERT, as a single statement of chained data-modifying CTEs).
+  Same lock, same validation point, same rows written, same atomicity —
+  only fewer network hops. Raw SQL means ids are generated in JS
+  (`@default(uuid())` is Prisma-client-side; the columns have no DB
+  default).
+- **Pre-transaction lookups: 3 concurrent.** idempotency lookup, user
+  lookup and the existing 5s auction cache (ADR-0017) in one `Promise.all`.
+- **Redis fast-reject.** On a cache hit, the same `assertBidIsAcceptable`
+  runs against the cached auction first, so a doomed bid (too low, ended,
+  not active, own auction) is rejected without opening a transaction. It
+  can only reject early, never accept early. Accepted, bounded risk: if a
+  commit's cache invalidation never ran (crash/Redis outage in that gap),
+  a stale endTime from before an anti-sniping extension could wrongly
+  reject a valid bid for up to the 5s TTL — the same staleness bound
+  ADR-0017 already accepts for reads.
+
+Two things this surfaced:
+
+- A raw-SQL unique violation comes back from Prisma as `P2010` (Postgres
+  `23505` in `meta.code`), not `P2002`. The cross-auction idempotency-key
+  race handler only checked `P2002`, so that race briefly returned 500
+  instead of a replayed 201 — caught by the existing race test, fixed with
+  `isUniqueViolation()` covering both shapes.
+- No bid test checked outbox writes, so a broken CTE could have silently
+  dropped search reindexing / outbid notifications while every bid test
+  passed. Added a test asserting exactly one reindex event per accepted bid
+  and an outbid event (with the right payload) only when another bidder is
+  outbid.
+
+Full suite: 191/191 passing under `--runInBand` (the project's `npm test`
+mode). The notifications suite can't currently run locally — see the
+Revisit Conditions entry on Redpanda's advertised address.
+
 ## Revisit Conditions
 
 - If local Docker-based end-to-end testing against Redpanda is ever
   actually needed, revisit the advertised-listener config then (e.g. a
   second listener advertised for a Docker-internal hostname).
+  **Now actually hit (2026-10-03):** local Redpanda advertises
+  `localhost:9092`; on this Windows machine Node resolves `localhost` to
+  `::1` first, and Docker resets IPv6 connections to that port. kafkajs
+  bootstraps fine via `127.0.0.1` (KAFKA_BROKERS) but then follows the
+  advertised `localhost` and gets `ECONNRESET` / "group coordinator not
+  found", so tests/notifications times out locally. Fix: advertise
+  `127.0.0.1:9092` instead (Redpanda's `--advertise-kafka-addr`) and
+  restart the container. Unrelated to production (Aiven).
+- The bid path is now 1 parallel lookup + 2 transaction round trips
+  (+ commit). If it still needs to go lower, the next lever is collapsing
+  the two transaction statements into a single stored procedure / one
+  statement (the validation would have to move into SQL, which is why it
+  wasn't done here), or a same-region database.
 - Gmail's send cap concern is moot now — Gmail SMTP is no longer the
   production path at all (see the addendum above).
 - If a domain is ever acquired for this project, switch back to Resend

@@ -1,6 +1,7 @@
 import type { Bid } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { notifyAuctionChanged } from '../../infrastructure/realtime/auctionEvents';
+import { getCachedAuction } from '../../infrastructure/redis/auctionCache';
 import { logger } from '../../infrastructure/observability/logger';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../middleware/errors';
 import { findUserById } from '../auth/repository';
@@ -61,25 +62,33 @@ function assertBidIsAcceptable(
   }
 }
 
+// Prisma reports the same database event — a unique-constraint violation —
+// differently depending on which API hit it: the structured Client API
+// (e.g. tx.bid.create()) maps it to P2002, while a raw query (repository.ts's
+// combined write statement) gets the generic "raw query failed" P2010 with
+// the real Postgres SQLSTATE (23505 = unique_violation) in meta.code.
+function isUniqueViolation(err: Prisma.PrismaClientKnownRequestError): boolean {
+  return (
+    err.code === 'P2002' || (err.code === 'P2010' && (err.meta as { code?: string } | undefined)?.code === '23505')
+  );
+}
+
 export async function placeBid(
   bidderId: string,
   auctionId: string,
   input: PlaceBidInput,
 ): Promise<PlaceBidResult> {
-  // These two checks are independent of each other (neither's result
-  // depends on the other), so they run concurrently rather than as two
-  // sequential awaits — one network round trip's worth of latency instead
-  // of two. Measured live (ADR-0036 addendum): with the DB a cross-region
-  // hop away, every round trip on this path is expensive enough that this
-  // kind of consolidation is worth doing even for just one saved trip.
-  // Real tradeoff, not hidden: the idempotent-replay fast path below now
-  // also pays for the user lookup it didn't strictly need (the original
-  // request already passed this check to create the bid being replayed) —
-  // accepted because replays are rare and the common (non-replay) case is
-  // what actually matters for perceived bid latency.
-  const [existing, bidder] = await Promise.all([
+  // Three independent lookups (none needs another's result), run
+  // concurrently: one round trip's worth of latency instead of three.
+  // Measured live (ADR-0036 addendum): with the DB a cross-region hop away,
+  // every saved round trip on this path is worth it. Real tradeoff, not
+  // hidden: the idempotent-replay fast path below now also pays for the user
+  // and cache lookups it didn't strictly need — accepted because replays
+  // are rare and the common (non-replay) case is what users feel.
+  const [existing, bidder, cachedAuction] = await Promise.all([
     findBidByIdempotencyKey(bidderId, input.idempotencyKey),
     findUserById(bidderId),
+    getCachedAuction(auctionId),
   ]);
 
   // Fast path: a genuine retry of an already-succeeded request. No lock
@@ -100,6 +109,28 @@ export async function placeBid(
   // for a reason that was already knowable up front (Section 64).
   if (!bidder || !bidder.emailVerifiedAt) {
     throw new ForbiddenError('Verify your email before placing a bid', 'EMAIL_NOT_VERIFIED');
+  }
+
+  // Fast-reject precheck — an optimization, not a correctness gate. The
+  // 5s auction cache (ADR-0017) is invalidated synchronously after every
+  // commit, so on a cache HIT, running the SAME validator against it can
+  // reject an obviously-doomed bid (too low, ended, not active, shill) for
+  // free, instead of opening the Postgres transaction just to learn the
+  // same thing. On a miss or Redis error, cachedAuction is null and this
+  // does nothing. A bid that passes here is still fully re-validated under
+  // the real row lock below, so this can only cause an early REJECT, never
+  // an early ACCEPT.
+  //
+  // Real tradeoff, not hidden: the cache can only be wrong (not just
+  // absent) if a previous commit's invalidation never ran — a crash or
+  // Redis outage between that commit and notifyAuctionChanged — and then
+  // for at most the 5s TTL. Price and status only move one way, so the one
+  // check that could then wrongly reject a valid bid is endTime, right after
+  // an anti-sniping extension. That's the same staleness bound ADR-0017
+  // already accepts for GET /auctions/:id. If it's ever judged too risky
+  // for bidding specifically, delete this block — not the cache.
+  if (cachedAuction) {
+    assertBidIsAcceptable(cachedAuction, bidderId, input.amountCents);
   }
 
   try {
@@ -134,8 +165,11 @@ export async function placeBid(
     // in-transaction check sees the other's insert before both attempt one.
     // The DB's unique constraint is still the actual source of truth here,
     // same pattern as registration's email race (AUTH-002): treat the
-    // loser's P2002 as a successful idempotent replay, not an error.
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+    // loser's unique violation as a successful idempotent replay, not an
+    // error. isUniqueViolation() covers both shapes Prisma reports it in —
+    // the raw-SQL insert reports P2010, not P2002; checking only P2002 turned
+    // this exact race into a 500 (caught by place-bid.test.ts).
+    if (err instanceof Prisma.PrismaClientKnownRequestError && isUniqueViolation(err)) {
       const bid = await findBidByIdempotencyKey(bidderId, input.idempotencyKey);
       if (bid) {
         logger.warn(

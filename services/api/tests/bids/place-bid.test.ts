@@ -23,7 +23,7 @@ async function registerAndLogin(label = 'user') {
   await request(app).post('/api/v1/auth/register').send({ email, password, name: 'Bid Test' });
   await prisma.user.update({ where: { email }, data: { emailVerifiedAt: new Date() } });
   const loginRes = await request(app).post('/api/v1/auth/login').send({ email, password });
-  return { accessToken: loginRes.body.accessToken as string };
+  return { accessToken: loginRes.body.accessToken as string, userId: loginRes.body.user.id as string };
 }
 
 async function createActiveAuction(sellerToken: string, startingPriceCents = 1000, endTime?: Date) {
@@ -200,6 +200,42 @@ describe('POST /api/v1/auctions/:auctionId/bids', () => {
   // requests lock different auction rows and so can't see each other via
   // repository.ts's in-transaction re-check the way two same-auction
   // requests would.
+  // The bid's outbox writes happen in the same raw-SQL statement as the bid
+  // insert (repository.ts) — nothing else in this file looks at
+  // outbox_events, so a broken CTE there would otherwise pass every test
+  // here while silently breaking search reindexing and outbid notifications.
+  it('writes one reindex event per accepted bid, and an outbid event only when someone else is outbid', async () => {
+    const seller = await registerAndLogin('seller');
+    const bidderA = await registerAndLogin('bidderA');
+    const bidderB = await registerAndLogin('bidderB');
+    const auctionId = await createActiveAuction(seller.accessToken, 1000);
+    // create/publish/start write their own reindex events — only count the bids'.
+    await prisma.outboxEvent.deleteMany({ where: { key: auctionId } });
+
+    expect((await placeBid(auctionId, bidderA.accessToken, 1500)).status).toBe(201); // first bid: no one outbid
+    expect((await placeBid(auctionId, bidderA.accessToken, 1600)).status).toBe(201); // self-outbid: no event
+    expect((await placeBid(auctionId, bidderB.accessToken, 2000)).status).toBe(201); // outbids A
+
+    const events = await prisma.outboxEvent.findMany({ where: { key: auctionId } });
+    await prisma.outboxEvent.deleteMany({ where: { key: auctionId } });
+
+    const reindex = events.filter((e) => (e.payload as { type: string }).type === 'auction.reindex');
+    const outbid = events.filter((e) => (e.payload as { type: string }).type === 'bid.outbid');
+    expect(reindex).toHaveLength(3);
+    expect(outbid).toHaveLength(1);
+    expect(outbid[0]!.topic).toBe('bid-events');
+    expect(outbid[0]!.payload).toEqual({
+      type: 'bid.outbid',
+      auctionId,
+      outbidUserId: bidderA.userId,
+      previousAmountCents: 1600,
+      newAmountCents: 2000,
+    });
+
+    const auction = await prisma.auction.findUniqueOrThrow({ where: { id: auctionId } });
+    expect(auction.currentPriceCents).toBe(2000);
+  });
+
   it('replays the same result when one idempotency key is reused across two different auctions at once', async () => {
     const seller = await registerAndLogin('seller');
     const bidder = await registerAndLogin('bidder');
