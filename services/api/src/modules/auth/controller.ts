@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { env } from '../../config/env';
+import { cookieSameSitePolicy } from '../../middleware/csrf';
 import { ACCESS_TOKEN_TTL_SECONDS } from '../../infrastructure/security/tokens';
 import { UnauthorizedError } from '../../middleware/errors';
 import {
@@ -29,14 +30,23 @@ const REFRESH_COOKIE_PATH = '/api/v1/auth';
 
 // Scoped to /api/v1/auth so it isn't sent on every API request. httpOnly
 // means client-side JS (and therefore a successful XSS payload) can never
-// read it. SameSite=Lax blocks it on cross-site POSTs, which is how CSRF
-// against /login, /logout, /refresh would otherwise work — see ADR-0003 for
-// the documented revisit condition (cross-origin frontend/backend in prod).
+// read it.
+//
+// SameSite: 'lax' in dev (frontend/backend share localhost — Lax alone
+// blocks cross-site POSTs, the standard CSRF defense). 'none' in
+// production (ADR-0003's anticipated cross-origin deployment, hit for
+// real in ADR-0036's addendum: Vercel frontend + Render backend are
+// genuinely different origins, so Lax silently never sends this cookie on
+// any fetch() call — every page reload looked like a logout). 'none'
+// requires 'secure' to be set too (browsers reject None without Secure),
+// which was already conditional on production. requireTrustedOrigin
+// (middleware/csrf.ts, wired in routes.ts) is what replaces the CSRF
+// protection Lax was providing, since None alone reopens that gap.
 function setRefreshCookie(res: Response, refreshToken: string, refreshTokenExpiresAt: Date): void {
   res.cookie(REFRESH_COOKIE_NAME, refreshToken, {
     httpOnly: true,
     secure: env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    sameSite: cookieSameSitePolicy(env.NODE_ENV),
     path: REFRESH_COOKIE_PATH,
     expires: refreshTokenExpiresAt,
   });
