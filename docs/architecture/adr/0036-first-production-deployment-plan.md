@@ -336,6 +336,53 @@ up explicit 10s connection/greeting/socket timeouts as defense-in-depth
 (Section 67) — unrelated to which provider is active, but a real gap this
 incident exposed: it previously had none at all.
 
+## Addendum (2026-10-03): backend/database region mismatch made bids slow
+
+Found live, from a direct user report ("bids take 1 sec, needs to be
+sub-second"). Measured rather than guessed at, per Section 62:
+
+- `placeBid`'s full path (service.ts + repository.ts) makes 9+ SEQUENTIAL
+  network round trips: idempotency check, email-verification check, then
+  inside one transaction — `SELECT ... FOR UPDATE` (the row lock), a
+  second idempotency check, a previous-highest-bid lookup, the bid
+  INSERT, the auction UPDATE, 1-2 outbox event INSERTs, COMMIT — plus one
+  Redis call afterward to invalidate the auction cache. Every round trip
+  here is real and necessary for Section 10's correctness guarantees
+  (the row lock + re-checks are what closes the concurrent-bid race) —
+  this is NOT bloat to trim.
+- Measured each round trip's actual cost: `GET /readiness` (a single bare
+  `SELECT 1`) took a STABLE ~500ms-1s even after the connection pool
+  warmed up. For reference, a same-region query should be single-digit
+  milliseconds. At 9+ round trips, even optimistic per-round-trip timing
+  implied multiple seconds for a full bid — in the right range of what
+  was actually felt.
+- Root cause: the database (Supabase, `ap-northeast-1` / Tokyo — fixed at
+  project creation, not changeable without migrating to a new project)
+  and the backend (Render, Oregon / US West — picked without this in
+  mind, since it was the first region offered during setup) are about as
+  far apart as two regions can realistically be.
+- Render's free tier offers exactly 5 regions (Oregon, Ohio, Virginia,
+  Frankfurt, Singapore) and — critically — a service's region is fixed at
+  creation and cannot be changed afterward. No literal Tokyo option
+  exists; Singapore is the closest available. Stood up a SECOND Render
+  service in Singapore (`auctionx-up1r.onrender.com`), re-verified every
+  piece of infra against it (DB, Redis, Kafka, storage, email, CORS),
+  then cut Vercel's `NEXT_PUBLIC_API_URL` over to it. The original Oregon
+  service (`auctionx-app.onrender.com`) is being decommissioned.
+- Result, measured the same way: the same `/readiness` single-round-trip
+  check dropped from ~500ms-1s to a stable ~250-300ms from Singapore —
+  roughly 2-3x faster, not a complete fix (Singapore-Tokyo is still real
+  physical distance, just a much shorter hop than Oregon-Tokyo), but a
+  genuine, measured improvement with zero code changes — this was
+  entirely an infrastructure placement problem, not an application-layer
+  one.
+- Also repeated the EXACT same mistake as the first Render deploy while
+  wiring this up: set `NEXT_PUBLIC_API_URL` to the bare new Render domain
+  without the `/api/v1` suffix, breaking every API call again until
+  caught and fixed the same way as before (remove the env var, re-add it
+  correctly, redeploy — `NEXT_PUBLIC_` values are baked in at build time,
+  so the env var change alone does nothing).
+
 ## Revisit Conditions
 
 - If local Docker-based end-to-end testing against Redpanda is ever
@@ -356,3 +403,17 @@ incident exposed: it previously had none at all.
   platform with faster cold starts (Fly.io's Firecracker VMs were
   considered and are a live option, not evaluated further since this
   wasn't yet a blocking concern for a $0 learning deployment).
+- ~250-300ms per DB round trip (Singapore <-> Tokyo) is a real, accepted
+  floor given free-tier region constraints, not a solved problem. If bid
+  latency ever needs to go lower than that allows, the actual lever is
+  reducing CROSS-REGION round trips, not adding more code: either a
+  same-region (Tokyo-area or closer) paid Postgres host, or caching the
+  auction row's lock-relevant fields (price/status/endTime) in Redis as a
+  fast pre-check BEFORE opening the Postgres transaction — rejecting an
+  obviously-stale bid in ~1 round trip instead of paying for the full
+  transaction just to find out. Not implemented now — YAGNI until this is
+  an actual measured problem again at the new baseline.
+- Delete the original Oregon Render service (`auctionx-app.onrender.com`)
+  once the Singapore one (`auctionx-up1r.onrender.com`) has had a bit more
+  real usage confirming it's stable — kept alongside it temporarily as a
+  rollback option during the cutover.

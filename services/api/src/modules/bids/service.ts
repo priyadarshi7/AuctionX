@@ -66,13 +66,28 @@ export async function placeBid(
   auctionId: string,
   input: PlaceBidInput,
 ): Promise<PlaceBidResult> {
+  // These two checks are independent of each other (neither's result
+  // depends on the other), so they run concurrently rather than as two
+  // sequential awaits — one network round trip's worth of latency instead
+  // of two. Measured live (ADR-0036 addendum): with the DB a cross-region
+  // hop away, every round trip on this path is expensive enough that this
+  // kind of consolidation is worth doing even for just one saved trip.
+  // Real tradeoff, not hidden: the idempotent-replay fast path below now
+  // also pays for the user lookup it didn't strictly need (the original
+  // request already passed this check to create the bid being replayed) —
+  // accepted because replays are rare and the common (non-replay) case is
+  // what actually matters for perceived bid latency.
+  const [existing, bidder] = await Promise.all([
+    findBidByIdempotencyKey(bidderId, input.idempotencyKey),
+    findUserById(bidderId),
+  ]);
+
   // Fast path: a genuine retry of an already-succeeded request. No lock
   // needed here — nothing is being decided, only returned — which keeps a
   // stream of retries from adding to contention on a hot auction's row. A
   // replay never re-triggers a fresh anti-sniping extension of its own —
   // it's the SAME original acceptance, not a new event — and by the same
   // logic never re-sends the outbid notification either.
-  const existing = await findBidByIdempotencyKey(bidderId, input.idempotencyKey);
   if (existing) {
     return { bid: existing, extended: false };
   }
@@ -83,7 +98,6 @@ export async function placeBid(
   // assertBidIsAcceptable: this has nothing to do with the auction's state,
   // so there's no reason to pay for contention on a hot row just to reject
   // for a reason that was already knowable up front (Section 64).
-  const bidder = await findUserById(bidderId);
   if (!bidder || !bidder.emailVerifiedAt) {
     throw new ForbiddenError('Verify your email before placing a bid', 'EMAIL_NOT_VERIFIED');
   }
