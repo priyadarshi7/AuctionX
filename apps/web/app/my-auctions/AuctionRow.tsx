@@ -4,7 +4,7 @@ import { useMutation } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useState } from 'react';
 import { ApiError } from '@/lib/apiClient';
-import { cancelAuctionRequest, pauseAuctionRequest, startAuctionRequest } from '@/lib/auctions';
+import { cancelAuctionRequest, pauseAuctionRequest, startAuctionRequest, withdrawAuctionRequest } from '@/lib/auctions';
 import { CATEGORY_DISPLAY } from '@/lib/categoryDisplay';
 import { formatCents } from '@/lib/format';
 import type { Auction } from '@/lib/types/auction';
@@ -47,8 +47,13 @@ export function AuctionRow({ auction, accessToken, onChanged }: Props) {
     },
   });
 
-  const pending = start.isPending || pause.isPending || cancel.isPending;
-  const error = start.error ?? pause.error ?? cancel.error;
+  const withdraw = useMutation({
+    mutationFn: () => withdrawAuctionRequest(accessToken, auction.id),
+    onSuccess: onChanged,
+  });
+
+  const pending = start.isPending || pause.isPending || cancel.isPending || withdraw.isPending;
+  const error = start.error ?? pause.error ?? cancel.error ?? withdraw.error;
   const errorMessage = error instanceof ApiError ? error.message : error ? 'Something went wrong.' : null;
 
   // Cancelling is destructive, so it needs a second, explicit click. A
@@ -112,12 +117,15 @@ export function AuctionRow({ auction, accessToken, onChanged }: Props) {
           {/* DRAFT's currentPriceCents is a placeholder until the seller
               sets a real one on the auction's own page — see below. */}
           <p className="whitespace-nowrap font-display text-lg font-extrabold">
-            {auction.status === 'DRAFT' ? 'Not set yet' : formatCents(auction.currentPriceCents)}
+            {auction.status === 'DRAFT' || auction.status === 'PENDING_REVIEW'
+              ? 'Not set yet'
+              : formatCents(auction.currentPriceCents)}
           </p>
         </div>
       </div>
 
       {(auction.status === 'DRAFT' ||
+        auction.status === 'PENDING_REVIEW' ||
         auction.status === 'PUBLISHED' ||
         auction.status === 'ACTIVE' ||
         auction.status === 'PAUSED') && (
@@ -132,9 +140,20 @@ export function AuctionRow({ auction, accessToken, onChanged }: Props) {
           {auction.status === 'DRAFT' && (
             <>
               <ButtonLink href={`/auctions/${auction.id}`} size="sm">
-                Set price &amp; publish
+                Set price &amp; submit
               </ButtonLink>
               {cancelControl}
+            </>
+          )}
+
+          {auction.status === 'PENDING_REVIEW' && (
+            <>
+              <ButtonLink href={`/auctions/${auction.id}`} variant="secondary" size="sm">
+                View submission
+              </ButtonLink>
+              <Button variant="secondary" size="sm" onClick={() => withdraw.mutate()} disabled={pending}>
+                {withdraw.isPending ? 'Withdrawing…' : 'Withdraw'}
+              </Button>
             </>
           )}
 
@@ -155,9 +174,13 @@ export function AuctionRow({ auction, accessToken, onChanged }: Props) {
 
           {auction.status === 'PAUSED' && (
             <>
-              <Button size="sm" onClick={() => start.mutate()} disabled={pending}>
-                {start.isPending ? 'Resuming…' : 'Resume'}
-              </Button>
+              {auction.heldByAdmin ? (
+                <span className="text-sm font-semibold">Paused by a moderator</span>
+              ) : (
+                <Button size="sm" onClick={() => start.mutate()} disabled={pending}>
+                  {start.isPending ? 'Resuming…' : 'Resume'}
+                </Button>
+              )}
               {cancelControl}
             </>
           )}

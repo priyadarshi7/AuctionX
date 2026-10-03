@@ -66,7 +66,7 @@ export function findAuctionById(id: string): Promise<Auction | null> {
 }
 
 export type AuctionListFilters = {
-  status?: AuctionStatus | { not: AuctionStatus };
+  status?: AuctionStatus | { not: AuctionStatus } | { notIn: AuctionStatus[] };
   category?: AuctionCategory;
   sellerId?: string;
 };
@@ -160,6 +160,58 @@ export function publishAuctionRow(id: string, schedule: { startTime: Date; endTi
     });
     await publishReindexEvent(tx, id);
     return auction;
+  });
+}
+
+// The three review-stage transitions (ADR-0041) are GUARDED updates: the
+// required source state is part of the UPDATE's WHERE, so a seller
+// double-clicking, withdrawing while an admin approves, or the same request
+// arriving twice cannot apply a transition twice or from the wrong state.
+// They return null when the guard matched nothing; the service turns that
+// into the right error.
+
+export function submitAuctionRow(id: string, durationSeconds: number): Promise<Auction | null> {
+  return prisma.$transaction(async (tx) => {
+    const { count } = await tx.auction.updateMany({
+      where: { id, status: 'DRAFT' },
+      data: {
+        status: 'PENDING_REVIEW',
+        requestedDurationSeconds: durationSeconds,
+        submittedAt: new Date(),
+        // A fresh submission supersedes any earlier rejection note.
+        reviewNote: null,
+      },
+    });
+    if (count === 0) return null;
+    await publishReindexEvent(tx, id);
+    return tx.auction.findUniqueOrThrow({ where: { id } });
+  });
+}
+
+// The no-review path (a trusted seller, low-risk category, or review off):
+// DRAFT goes straight to ACTIVE with the clock starting now — the same end
+// state as publish + start, in one guarded step.
+export function activateDraftRow(id: string, schedule: { startTime: Date; endTime: Date }): Promise<Auction | null> {
+  return prisma.$transaction(async (tx) => {
+    const { count } = await tx.auction.updateMany({
+      where: { id, status: 'DRAFT' },
+      data: { status: 'ACTIVE', startTime: schedule.startTime, endTime: schedule.endTime },
+    });
+    if (count === 0) return null;
+    await publishReindexEvent(tx, id);
+    return tx.auction.findUniqueOrThrow({ where: { id } });
+  });
+}
+
+export function withdrawAuctionRow(id: string): Promise<Auction | null> {
+  return prisma.$transaction(async (tx) => {
+    const { count } = await tx.auction.updateMany({
+      where: { id, status: 'PENDING_REVIEW' },
+      data: { status: 'DRAFT', requestedDurationSeconds: null, submittedAt: null },
+    });
+    if (count === 0) return null;
+    await publishReindexEvent(tx, id);
+    return tx.auction.findUniqueOrThrow({ where: { id } });
   });
 }
 

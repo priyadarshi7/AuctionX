@@ -2,6 +2,7 @@ import type { AdminAuditLog, Auction, AuctionStatus, Order, OrderStatus, Role, U
 import { notifyAuctionChanged } from '../../infrastructure/realtime/auctionEvents';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../middleware/errors';
 import {
+  changeTrustedSeller,
   changeUserStatus,
   findAuctionStatus,
   findUser,
@@ -26,6 +27,7 @@ export type AdminUserView = {
   name: string;
   role: Role;
   status: UserStatus;
+  trustedSeller: boolean;
   emailVerifiedAt: Date | null;
   createdAt: Date;
 };
@@ -39,6 +41,7 @@ function toAdminUserView(user: User): AdminUserView {
     name: user.name,
     role: user.role,
     status: user.status,
+    trustedSeller: user.trustedSeller,
     emailVerifiedAt: user.emailVerifiedAt,
     createdAt: user.createdAt,
   };
@@ -166,6 +169,16 @@ const CONFLICT_CODE: Record<ModerationAction, string> = {
   pause: 'AUCTION_NOT_PAUSABLE',
   resume: 'AUCTION_NOT_RESUMABLE',
   cancel: 'AUCTION_NOT_CANCELLABLE',
+  approve: 'AUCTION_NOT_REVIEWABLE',
+  reject: 'AUCTION_NOT_REVIEWABLE',
+};
+
+const VERB_PAST: Record<ModerationAction, string> = {
+  pause: 'paused',
+  resume: 'resumed',
+  cancel: 'cancelled',
+  approve: 'approved',
+  reject: 'rejected',
 };
 
 // Unlike a seller's own pause/cancel, an admin may act on ANY seller's
@@ -195,7 +208,7 @@ export async function moderateAuctionAsAdmin(
   }
   throw new ConflictError(
     CONFLICT_CODE[action],
-    `A ${current.status} auction cannot be ${action === 'cancel' ? 'cancelled' : action === 'pause' ? 'paused' : 'resumed'}`,
+    `A ${current.status} auction cannot be ${VERB_PAST[action]}`,
   );
 }
 
@@ -234,4 +247,28 @@ export async function listOrdersAsAdmin(
 
 export function getStatsForAdmin(): Promise<PlatformStats> {
   return getPlatformStats(new Date());
+}
+
+// Marking a seller trusted lets their LOW-RISK listings skip review; it never
+// bypasses the high-risk categories (reviewPolicy.ts). No-op success when
+// they're already in that state, recording nothing.
+export async function setTrustedSellerAsAdmin(
+  actorId: string,
+  targetId: string,
+  trusted: boolean,
+  reason: string | undefined,
+): Promise<AdminUserView> {
+  const target = await findUser(targetId);
+  if (!target) {
+    throw new NotFoundError('User not found');
+  }
+  const changed = await changeTrustedSeller(actorId, targetId, trusted, reason);
+  if (changed) {
+    return toAdminUserView(changed);
+  }
+  const latest = await findUser(targetId);
+  if (!latest) {
+    throw new NotFoundError('User not found');
+  }
+  return toAdminUserView(latest);
 }

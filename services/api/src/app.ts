@@ -11,6 +11,7 @@ import { env } from './config/env';
 import { logger } from './infrastructure/observability/logger';
 import { prisma } from './infrastructure/database/prisma';
 import { adminRoutes } from './modules/admin/routes';
+import { documentRoutes } from './modules/documents/routes';
 import { authRoutes } from './modules/auth/routes';
 import { auctionRoutes } from './modules/auctions/routes';
 import { bidRoutes } from './modules/bids/routes';
@@ -83,6 +84,7 @@ export function createApp(): Express {
   app.use('/api/v1/admin', adminRoutes);
   app.use('/api/v1/auctions', auctionRoutes);
   app.use('/api/v1/auctions/:auctionId/bids', bidRoutes);
+  app.use('/api/v1/auctions/:auctionId/documents', documentRoutes);
   app.use('/api/v1/uploads', uploadRoutes);
   app.use('/api/v1/orders', orderRoutes);
   app.use('/api/v1/notifications', notificationRoutes);

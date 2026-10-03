@@ -12,6 +12,7 @@ export type AdminUser = {
   name: string;
   role: UserRole;
   status: UserStatus;
+  trustedSeller: boolean;
   emailVerifiedAt: string | null;
   createdAt: string;
 };
@@ -43,4 +44,4 @@ export type PlatformStats = {
 
 export type Paged<K extends string, T> = { [P in K]: T[] } & { nextCursor: string | null };
 
-export type ModerationAction = 'pause' | 'resume' | 'cancel';
+export type ModerationAction = 'pause' | 'resume' | 'cancel' | 'approve' | 'reject';

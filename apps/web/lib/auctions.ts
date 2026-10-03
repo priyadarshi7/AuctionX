@@ -91,6 +91,26 @@ export function publishAuctionRequest(
   });
 }
 
+// The review-aware way to list an auction (ADR-0041): the server decides
+// whether it waits for an admin (PENDING_REVIEW) or goes straight live. The
+// client sends a DURATION, not an end time, so the clock starts when the
+// auction actually goes live.
+export function submitAuctionRequest(
+  accessToken: string,
+  auctionId: string,
+  durationSeconds: number,
+): Promise<{ auction: Auction }> {
+  return apiFetch<{ auction: Auction }>(`/auctions/${auctionId}/submit`, {
+    method: 'POST',
+    body: { durationSeconds },
+    accessToken,
+  });
+}
+
+export function withdrawAuctionRequest(accessToken: string, auctionId: string): Promise<{ auction: Auction }> {
+  return apiFetch<{ auction: Auction }>(`/auctions/${auctionId}/withdraw`, { method: 'POST', accessToken });
+}
+
 export function startAuctionRequest(accessToken: string, auctionId: string): Promise<{ auction: Auction }> {
   return apiFetch<{ auction: Auction }>(`/auctions/${auctionId}/start`, { method: 'POST', accessToken });
 }

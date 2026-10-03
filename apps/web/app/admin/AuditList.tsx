@@ -7,6 +7,9 @@ const ACTION_LABEL: Record<string, string> = {
   'auction.pause': 'Paused auction',
   'auction.resume': 'Resumed auction',
   'auction.cancel': 'Cancelled auction',
+  'auction.approve': 'Approved listing',
+  'auction.reject': 'Sent listing back to seller',
+  'user.trusted_changed': 'Changed trusted-seller status',
 };
 
 function targetHref(entry: AuditEntry): string | null {

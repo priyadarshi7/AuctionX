@@ -56,10 +56,11 @@ export async function handleSearchEvent(topic: string, _key: string | null, payl
 
   const auction = await findAuctionById(payload.auctionId);
 
-  // DRAFT is never publicly visible (ADR-0008) — must never be searchable.
+  // DRAFT and PENDING_REVIEW are never publicly visible (ADR-0008, ADR-0041)
+  // — must never be searchable.
   // A missing row can't happen today (no delete endpoint exists), but
   // `deleteAuctionDocument` is a safe no-op either way (`ignore: [404]`).
-  if (!auction || auction.status === 'DRAFT') {
+  if (!auction || auction.status === 'DRAFT' || auction.status === 'PENDING_REVIEW') {
     await deleteAuctionDocument(payload.auctionId);
     return;
   }

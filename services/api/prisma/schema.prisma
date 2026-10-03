@@ -36,6 +36,10 @@ model User {
   // does (modules/auctions/service.ts, modules/bids/service.ts) — the two
   // places trust actually matters, per real product discussion 2026-09-30.
   emailVerifiedAt DateTime?
+  // A seller an admin has decided to trust: their low-risk listings skip the
+  // review queue (ADR-0041). Everyone starts false, so by default every
+  // listing is reviewed; trust is granted per seller, audited, revocable.
+  trustedSeller   Boolean   @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -129,6 +133,10 @@ model EmailVerificationToken {
 
 enum AuctionStatus {
   DRAFT
+  // Submitted by the seller, waiting for an admin to approve or reject it
+  // (ADR-0041). Invisible to the public exactly like DRAFT. Approval moves
+  // it straight to ACTIVE with the clock starting at approval time.
+  PENDING_REVIEW
   PUBLISHED
   ACTIVE
   PAUSED
@@ -206,12 +214,31 @@ model Auction {
   // these would make "did this run its full course or end early" unrecoverable.
   endedAt   DateTime?
 
+  // Review stage (ADR-0041). The seller picks a DURATION when submitting,
+  // not an end time: an end time chosen now would be eaten by however long
+  // the review takes. The clock (startTime/endTime) is set from this when
+  // an admin approves. Who reviewed is NOT stored here: auctions are served
+  // to the public as-is, and the audit log already records the reviewer.
+  // reviewNote is the admin's rejection reason, shown to the seller (it only
+  // exists while the auction is a non-public DRAFT, and is cleared on
+  // approval).
+  requestedDurationSeconds Int?
+  submittedAt              DateTime?
+  reviewedAt               DateTime?
+  reviewNote               String?
+
+  // True while an ADMIN has paused this auction (ADR-0041). A seller can
+  // normally pause and resume their own auction, but must not be able to
+  // lift a moderator's pause; cleared when the admin resumes or cancels it.
+  heldByAdmin Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   bids      Bid[]
   order     Order?
   valuation AuctionValuation?
+  documents AuctionDocument[]
 
   @@index([sellerId])
   @@index([status])
@@ -606,4 +633,27 @@ model AdminAuditLog {
   // The audit log page itself: newest first across everything.
   @@index([createdAt])
   @@map("admin_audit_logs")
+}
+
+// A supporting document for a listing (certificate, receipt, provenance),
+// uploaded by the seller and read by the seller and admins only (ADR-0041).
+// Stored in a PRIVATE bucket and only ever served through short-lived signed
+// URLs, never a public URL: these routinely contain names, addresses and
+// serial numbers. Rows only exist for objects that were confirmed to exist
+// in the bucket when registered (the client's claimed size is never trusted).
+// Cascade, unlike most FKs here: a document has no meaning without its
+// auction. (The bucket object itself is not removed by the cascade.)
+model AuctionDocument {
+  id          String   @id @default(uuid())
+  auctionId   String
+  auction     Auction  @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  uploaderId  String
+  objectKey   String   @unique
+  fileName    String
+  contentType String
+  sizeBytes   Int
+  createdAt   DateTime @default(now())
+
+  @@index([auctionId])
+  @@map("auction_documents")
 }

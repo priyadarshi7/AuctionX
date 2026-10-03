@@ -40,6 +40,19 @@ export function setUserStatusRequest(
   });
 }
 
+export function setTrustedSellerRequest(
+  accessToken: string,
+  userId: string,
+  trusted: boolean,
+  reason?: string,
+): Promise<{ user: AdminUser }> {
+  return apiFetch(`/admin/users/${userId}/trusted`, {
+    method: 'PATCH',
+    accessToken,
+    body: { trusted, ...(reason ? { reason } : {}) },
+  });
+}
+
 export function listAuctionsRequest(
   accessToken: string,
   filters: { search?: string; status?: AuctionStatus },

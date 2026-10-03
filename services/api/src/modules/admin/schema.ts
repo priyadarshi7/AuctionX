@@ -46,11 +46,13 @@ export type ListAdminAuctionsQuery = z.infer<typeof listAdminAuctionsQuerySchema
 // goes into the audit log and to the seller); resume doesn't.
 export const moderateAuctionSchema = z
   .object({
-    action: z.enum(['pause', 'resume', 'cancel']),
+    action: z.enum(['pause', 'resume', 'cancel', 'approve', 'reject']),
     reason: z.string().trim().min(3, 'Give a reason (at least 3 characters)').max(500).optional(),
   })
-  .refine((data) => data.action === 'resume' || !!data.reason, {
-    message: 'A reason is required to pause or cancel an auction',
+  // Anything that takes a listing away or sends it back needs a reason (it
+  // goes in the audit log and to the seller); resuming and approving don't.
+  .refine((data) => data.action === 'resume' || data.action === 'approve' || !!data.reason, {
+    message: 'A reason is required to pause, cancel or reject an auction',
     path: ['reason'],
   });
 export type ModerateAuctionInput = z.infer<typeof moderateAuctionSchema>;
@@ -63,3 +65,9 @@ export const listAdminOrdersQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });
 export type ListAdminOrdersQuery = z.infer<typeof listAdminOrdersQuerySchema>;
+
+export const setTrustedSellerSchema = z.object({
+  trusted: z.boolean(),
+  reason: z.string().trim().min(3).max(500).optional(),
+});
+export type SetTrustedSellerInput = z.infer<typeof setTrustedSellerSchema>;

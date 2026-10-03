@@ -8,12 +8,15 @@ import {
   pauseExistingAuction,
   publishExistingAuction,
   startExistingAuction,
+  submitExistingAuction,
   updateExistingAuction,
+  withdrawExistingAuction,
 } from './service';
 import type {
   CreateAuctionInput,
   ListAuctionsQuery,
   PublishAuctionInput,
+  SubmitAuctionInput,
   UpdateAuctionInput,
 } from './schema';
 
@@ -133,6 +136,31 @@ export async function cancelAuctionHandler(
       throw new UnauthorizedError('UNAUTHENTICATED');
     }
     const auction = await cancelExistingAuction(req.user.id, req.params.id as string);
+    res.status(200).json({ auction });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function submitAuctionHandler(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.user) {
+      throw new UnauthorizedError('UNAUTHENTICATED');
+    }
+    const input = req.body as SubmitAuctionInput;
+    const auction = await submitExistingAuction(req.user.id, req.params.id as string, input);
+    res.status(200).json({ auction });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function withdrawAuctionHandler(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.user) {
+      throw new UnauthorizedError('UNAUTHENTICATED');
+    }
+    const auction = await withdrawExistingAuction(req.user.id, req.params.id as string);
     res.status(200).json({ auction });
   } catch (err) {
     next(err);

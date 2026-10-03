@@ -63,6 +63,14 @@ const envSchema = z.object({
   // where it will run locally; the link is a placeholder contract until
   // that page exists, not a broken feature.
   FRONTEND_URL: z.string().url().default('http://localhost:3000'),
+  // Pre-publication review (ADR-0041, modules/auctions/reviewPolicy.ts).
+  // 'untrusted' is the real default: every listing is reviewed until an admin
+  // marks a seller trusted. The test suite forces 'off' (tests/jest.env.ts)
+  // so the many tests that publish auctions directly keep working.
+  AUCTION_REVIEW_MODE: z.enum(['off', 'untrusted']).default('untrusted'),
+  // Private bucket for seller documents (ADR-0041). MUST NOT be public:
+  // downloads only ever happen through short-lived signed URLs.
+  S3_DOCS_BUCKET: z.string().min(1).default('auctionx-docs'),
   // Object storage (Section 27): s3mock locally, Cloudflare R2 in
   // production — both speak the same S3 API, so these defaults exactly
   // match docker-compose.yml's `s3mock` service (see its comment for the

@@ -59,6 +59,35 @@ export async function listUsers(
   return { rows: hasMore ? rows.slice(0, limit) : rows, hasMore };
 }
 
+// Grants or revokes "trusted seller" (ADR-0041): a trusted seller's
+// low-risk listings skip the review queue. Same shape as changeUserStatus:
+// guarded UPDATE + audit entry in one transaction, null when nothing
+// changed (already in that state).
+export async function changeTrustedSeller(
+  actorId: string,
+  targetId: string,
+  trusted: boolean,
+  reason: string | undefined,
+): Promise<User | null> {
+  return prisma.$transaction(async (tx) => {
+    const { count } = await tx.user.updateMany({
+      where: { id: targetId, trustedSeller: { not: trusted } },
+      data: { trustedSeller: trusted },
+    });
+    if (count === 0) return null;
+    const user = await tx.user.findUniqueOrThrow({ where: { id: targetId } });
+    await writeAuditEntryInTx(tx, {
+      actorId,
+      action: 'user.trusted_changed',
+      targetType: 'user',
+      targetId,
+      reason,
+      metadata: { from: !trusted, to: trusted },
+    });
+    return user;
+  });
+}
+
 export function findUser(id: string): Promise<User | null> {
   return prisma.user.findUnique({ where: { id } });
 }
@@ -157,7 +186,7 @@ export async function listAuctionsForAdmin(
   return { rows: hasMore ? rows.slice(0, limit) : rows, hasMore };
 }
 
-export type ModerationAction = 'pause' | 'resume' | 'cancel';
+export type ModerationAction = 'pause' | 'resume' | 'cancel' | 'approve' | 'reject';
 
 // Which states each action may start from, and where it lands. Cancel
 // mirrors the seller-facing rule (any non-terminal state); ENDED and
@@ -166,7 +195,12 @@ export type ModerationAction = 'pause' | 'resume' | 'cancel';
 const MODERATION_RULES: Record<ModerationAction, { from: AuctionStatus[]; to: AuctionStatus }> = {
   pause: { from: ['ACTIVE'], to: 'PAUSED' },
   resume: { from: ['PAUSED'], to: 'ACTIVE' },
-  cancel: { from: ['DRAFT', 'PUBLISHED', 'ACTIVE', 'PAUSED'], to: 'CANCELLED' },
+  cancel: { from: ['DRAFT', 'PENDING_REVIEW', 'PUBLISHED', 'ACTIVE', 'PAUSED'], to: 'CANCELLED' },
+  // Review decisions (ADR-0041). Approve goes LIVE, with the clock starting
+  // now from the duration the seller asked for; reject sends it back to
+  // DRAFT with the admin's reason for the seller to fix and resubmit.
+  approve: { from: ['PENDING_REVIEW'], to: 'ACTIVE' },
+  reject: { from: ['PENDING_REVIEW'], to: 'DRAFT' },
 };
 
 export function allowedStatusesFor(action: ModerationAction): AuctionStatus[] {
@@ -191,16 +225,49 @@ export async function moderateAuctionRow(
   const rule = MODERATION_RULES[action];
   const now = new Date();
   return prisma.$transaction(async (tx) => {
-    const before = await tx.auction.findUnique({ where: { id: auctionId }, select: { status: true, sellerId: true } });
+    const before = await tx.auction.findUnique({
+      where: { id: auctionId },
+      select: { status: true, sellerId: true, requestedDurationSeconds: true },
+    });
     if (!before) return null;
 
+    let extraWhere: Prisma.AuctionWhereInput = {};
+    let extraData: Prisma.AuctionUpdateManyMutationInput = {};
+    if (action === 'pause') {
+      extraData = { heldByAdmin: true };
+    } else if (action === 'resume') {
+      extraWhere = { endTime: { gt: now } };
+      extraData = { heldByAdmin: false };
+    } else if (action === 'cancel') {
+      extraData = { endedAt: now, heldByAdmin: false };
+    } else if (action === 'approve') {
+      // The clock starts NOW, at approval, from the duration the seller
+      // chose: a listing that waited two days in the queue still gets its
+      // full run. The duration is also pinned in the WHERE, so a seller who
+      // withdraws and resubmits with a different duration between our read
+      // and this write makes the update match nothing instead of applying
+      // the stale one.
+      const seconds = before.requestedDurationSeconds;
+      if (seconds === null) return null;
+      extraWhere = { requestedDurationSeconds: seconds };
+      extraData = {
+        startTime: now,
+        endTime: new Date(now.getTime() + seconds * 1000),
+        reviewedAt: now,
+        reviewNote: null,
+      };
+    } else if (action === 'reject') {
+      extraData = {
+        reviewedAt: now,
+        reviewNote: reason ?? null,
+        requestedDurationSeconds: null,
+        submittedAt: null,
+      };
+    }
+
     const { count } = await tx.auction.updateMany({
-      where: {
-        id: auctionId,
-        status: { in: rule.from },
-        ...(action === 'resume' ? { endTime: { gt: now } } : {}),
-      },
-      data: { status: rule.to, ...(action === 'cancel' ? { endedAt: now } : {}) },
+      where: { id: auctionId, status: { in: rule.from }, ...extraWhere },
+      data: { status: rule.to, ...extraData },
     });
     if (count === 0) return null;
 

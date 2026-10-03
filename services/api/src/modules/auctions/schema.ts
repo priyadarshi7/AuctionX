@@ -105,3 +105,16 @@ export const publishAuctionSchema = z
   );
 
 export type PublishAuctionInput = z.infer<typeof publishAuctionSchema>;
+
+// A duration, not an end time (ADR-0041): the clock starts when the auction
+// goes live, which for a reviewed listing is later than this request. 30s is
+// the floor so the whole flow can be exercised quickly in testing.
+export const submitAuctionSchema = z.object({
+  durationSeconds: z
+    .number()
+    .int()
+    .min(30)
+    .max(30 * 24 * 60 * 60),
+});
+
+export type SubmitAuctionInput = z.infer<typeof submitAuctionSchema>;

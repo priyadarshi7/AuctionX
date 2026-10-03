@@ -7,6 +7,7 @@ import {
   listOrdersAsAdmin,
   listUsersForAdmin,
   moderateAuctionAsAdmin,
+  setTrustedSellerAsAdmin,
   setUserStatusAsAdmin,
 } from './service';
 import type {
@@ -15,6 +16,7 @@ import type {
   ListAuditLogQuery,
   ListUsersQuery,
   ModerateAuctionInput,
+  SetTrustedSellerInput,
   UpdateUserStatusInput,
 } from './schema';
 
@@ -103,6 +105,19 @@ export async function listOrdersHandler(req: Request, res: Response, next: NextF
 export async function statsHandler(_req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     res.status(200).json({ stats: await getStatsForAdmin() });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function setTrustedSellerHandler(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.user) {
+      throw new UnauthorizedError('UNAUTHENTICATED');
+    }
+    const { trusted, reason } = req.body as SetTrustedSellerInput;
+    const user = await setTrustedSellerAsAdmin(req.user.id, req.params.userId as string, trusted, reason);
+    res.status(200).json({ user });
   } catch (err) {
     next(err);
   }

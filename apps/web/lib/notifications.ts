@@ -64,6 +64,15 @@ export function describeNotification(notification: Notification): { message: str
         href: `/orders/${notification.orderId}`,
       };
     case 'AUCTION_MODERATED': {
+      if (data.action === 'approve') {
+        return { message: 'Your listing was approved and is now live.', href: `/auctions/${notification.auctionId}` };
+      }
+      if (data.action === 'reject') {
+        return {
+          message: `Your listing needs changes before it can go live${data.reason ? `: ${String(data.reason)}` : '.'}`,
+          href: `/auctions/${notification.auctionId}`,
+        };
+      }
       const verb = data.action === 'cancel' ? 'cancelled' : data.action === 'pause' ? 'paused' : 'resumed';
       return {
         message: `A moderator ${verb} your auction${data.reason ? `: ${String(data.reason)}` : '.'}`,

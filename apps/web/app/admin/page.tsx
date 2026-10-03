@@ -42,12 +42,25 @@ export default function AdminDashboardPage() {
   const s = stats.data?.stats;
   const live = s?.auctions.ACTIVE ?? 0;
   const pendingOrders = s?.orders.PENDING_PAYMENT ?? 0;
+  const awaitingReview = s?.auctions.PENDING_REVIEW ?? 0;
 
   return (
     <>
       <PageHeader title="Dashboard" subtitle="A live snapshot of the marketplace." />
 
       {stats.isError && <Notice tone="error">Couldn’t load the stats. Try refreshing.</Notice>}
+
+      {awaitingReview > 0 && (
+        <div className="mb-6">
+          <Notice tone="info">
+            <strong>{awaitingReview}</strong> {awaitingReview === 1 ? 'listing is' : 'listings are'} waiting for your
+            review.{' '}
+            <Link href="/admin/auctions?status=PENDING_REVIEW" className="font-semibold underline underline-offset-4">
+              Open the review queue
+            </Link>
+          </Notice>
+        </div>
+      )}
 
       {s && s.needsRefund > 0 && (
         <div className="mb-6">
@@ -70,6 +83,12 @@ export default function AdminDashboardPage() {
       ) : (
         s && (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard
+              label="Awaiting review"
+              value={awaitingReview}
+              hint="New listings to approve"
+              href="/admin/auctions?status=PENDING_REVIEW"
+            />
             <StatCard label="Live auctions" value={live} hint={`${s.auctions.PAUSED ?? 0} paused`} href="/admin/auctions" />
             <StatCard label="Bids (24h)" value={s.bids.last24Hours} hint={`${s.bids.total} all time`} />
             <StatCard label="Users" value={s.users.total} hint={`${s.users.newLast7Days} new this week`} href="/admin/users" />

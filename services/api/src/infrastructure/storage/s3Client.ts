@@ -35,13 +35,19 @@ export const s3Client = new S3Client({
 // unrelated traffic (same reasoning as Redis/email — Section 51/12), only
 // image upload itself would fail until it's fixed.
 export async function ensureBucketExists(): Promise<void> {
-  try {
-    await s3Client.send(new CreateBucketCommand({ Bucket: env.S3_BUCKET }));
-    logger.info({ bucket: env.S3_BUCKET }, 'storage.bucket_created');
-  } catch (err) {
-    if (err instanceof BucketAlreadyOwnedByYou || err instanceof BucketAlreadyExists) {
-      return;
+  // The media bucket (public images) and the documents bucket (PRIVATE, signed
+  // URLs only — ADR-0041). Creating a bucket here gives it the S3 default,
+  // which is private; the media bucket's public read is a deployment-side
+  // setting, not something this code grants.
+  for (const bucket of [env.S3_BUCKET, env.S3_DOCS_BUCKET]) {
+    try {
+      await s3Client.send(new CreateBucketCommand({ Bucket: bucket }));
+      logger.info({ bucket }, 'storage.bucket_created');
+    } catch (err) {
+      if (err instanceof BucketAlreadyOwnedByYou || err instanceof BucketAlreadyExists) {
+        continue;
+      }
+      logger.warn({ err, bucket }, 'storage.bucket_ensure_failed');
     }
-    logger.warn({ err, bucket: env.S3_BUCKET }, 'storage.bucket_ensure_failed');
   }
 }

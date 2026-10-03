@@ -4,6 +4,7 @@ import type { ValuationStatus } from '@/lib/types/valuation';
 
 const AUCTION: Record<AuctionStatus, { label: string; cls: string }> = {
   DRAFT: { label: 'Draft', cls: 'bg-cream-2' },
+  PENDING_REVIEW: { label: 'In review', cls: 'bg-cyan' },
   PUBLISHED: { label: 'Scheduled', cls: 'bg-cyan' },
   ACTIVE: { label: 'Live', cls: 'bg-green' },
   PAUSED: { label: 'Paused', cls: 'bg-yellow' },

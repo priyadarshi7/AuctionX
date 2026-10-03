@@ -143,7 +143,7 @@ type AuctionModeratedPayload = {
   type: 'auction.moderated';
   auctionId: string;
   sellerId: string;
-  action: 'pause' | 'resume' | 'cancel';
+  action: 'pause' | 'resume' | 'cancel' | 'approve' | 'reject';
   reason: string | null;
 };
 

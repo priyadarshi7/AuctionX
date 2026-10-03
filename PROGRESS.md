@@ -125,8 +125,21 @@ DEPLOY-001 notes below are the history of getting there. Since then:
   cancel + reason + seller notification), admin orders list with a "needs
   refund" flag, live stats, and the `/admin` UI (dashboard, users, auctions,
   orders, audit log).
+- **REVIEW-001 (ADR-0041):** listings are held in PENDING_REVIEW until an admin
+  approves (clock starts at approval; seller chooses a duration). The server
+  enforces it: `POST /auctions/:id/submit` decides review vs straight-live and
+  `publish` refuses with REVIEW_REQUIRED. Policy: `AUCTION_REVIEW_MODE`
+  (`untrusted` default = review everything until a seller is marked trusted;
+  watches/jewelry/art/coins always reviewed and need documents). Seller
+  documents live in a PRIVATE bucket (`S3_DOCS_BUCKET`, default
+  `auctionx-docs`) behind signed URLs. Admins approve/reject (with reason) and
+  toggle trusted sellers in /admin. Also fixed: a seller could lift an admin's
+  pause (`heldByAdmin`).
+  **Deploy checklist for this feature:** run `prisma migrate deploy` (2 new
+  migrations), create the PRIVATE bucket `auctionx-docs` in Supabase Storage
+  (Public OFF), then deploy. After deploy every new listing needs review.
 - 30-second auction duration option for testing (`lib/duration.ts`).
-- Tests: 233 backend tests pass under `jest --runInBand`.
+- Tests: 261 backend tests pass under `jest --runInBand`.
   `tests/notifications/notifications.test.ts` cannot run locally: Redpanda
   advertises `localhost`, Node resolves it to `::1`, Docker resets it (ADR-0036
   Revisit Conditions has the one-line fix).

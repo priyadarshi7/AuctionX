@@ -16,6 +16,7 @@ import { PageMessage, Skeleton } from '../../components/ui/Page';
 import { AuctionStatusPill } from '../../components/ui/StatusPill';
 import { BidForm } from './BidForm';
 import { Gallery } from './Gallery';
+import { PendingReviewPanel } from './PendingReviewPanel';
 import { SetPriceAndPublishPanel } from './SetPriceAndPublishPanel';
 import { ValuationPanel } from './ValuationPanel';
 
@@ -91,6 +92,9 @@ export default function AuctionDetailPage() {
   const bids = bidsQuery.data?.bids ?? [];
   const display = CATEGORY_DISPLAY[auction.category];
   const isActive = auction.status === 'ACTIVE';
+  // Not live and not public yet: the price/bidding card has nothing true to
+  // show, so it is replaced by the seller's own panels (ADR-0041).
+  const preLive = auction.status === 'DRAFT' || auction.status === 'PENDING_REVIEW';
   const isSeller = !!user && user.id === auction.sellerId;
   const urgent = isActive && /^\d+s$/.test(timeRemaining);
 
@@ -158,7 +162,7 @@ export default function AuctionDetailPage() {
               whole card is replaced by the valuation + set-price panels
               below for a DRAFT seller instead of showing meaningless
               numbers. */}
-          {auction.status !== 'DRAFT' && (
+          {!preLive && (
             <div className="rounded-2xl border-2 border-line bg-white p-5 shadow-hard">
               <div className="flex items-end justify-between gap-4">
                 <div>
@@ -215,6 +219,16 @@ export default function AuctionDetailPage() {
                 </div>
               )}
 
+              {/* Honest about what review means (ADR-0041): the listing and
+                  its documents were looked at; the item itself was not
+                  inspected, so no authenticity promise is made. */}
+              {auction.reviewedAt && (
+                <p className="mt-4 border-t-2 border-line/10 pt-4 text-xs text-ink/60">
+                  ✓ Reviewed by AuctionX before going live: listing details and any supporting documents were
+                  checked. This is not a guarantee of authenticity.
+                </p>
+              )}
+
               {/* Deliberately no direct link to THIS auction's specific order —
                   the auction row has no orderId (ADR-0023 never added one; Order
                   is looked up the other way, by auctionId, only when needed).
@@ -241,8 +255,24 @@ export default function AuctionDetailPage() {
           {isSeller && accessToken && auction.status === 'DRAFT' && (
             <>
               <ValuationPanel auctionId={auctionId} accessToken={accessToken} />
-              <SetPriceAndPublishPanel auctionId={auctionId} accessToken={accessToken} />
+              <SetPriceAndPublishPanel
+                auctionId={auctionId}
+                accessToken={accessToken}
+                category={auction.category}
+                reviewNote={auction.reviewNote}
+              />
             </>
+          )}
+          {isSeller && accessToken && auction.status === 'PENDING_REVIEW' && (
+            <PendingReviewPanel auction={auction} accessToken={accessToken} />
+          )}
+          {!isSeller && user?.role === 'ADMIN' && auction.status === 'PENDING_REVIEW' && (
+            <Notice tone="info">
+              This listing is waiting for review.{' '}
+              <Link href="/admin/auctions?status=PENDING_REVIEW" className="font-semibold underline underline-offset-4">
+                Open the review queue
+              </Link>
+            </Notice>
           )}
 
           <section aria-labelledby="bids-heading">

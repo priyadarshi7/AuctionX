@@ -8,6 +8,7 @@ import {
   listOrdersHandler,
   listUsersHandler,
   moderateAuctionHandler,
+  setTrustedSellerHandler,
   statsHandler,
   updateUserStatusHandler,
 } from './controller';
@@ -17,6 +18,7 @@ import {
   listAuditLogQuerySchema,
   listUsersQuerySchema,
   moderateAuctionSchema,
+  setTrustedSellerSchema,
   updateUserStatusSchema,
 } from './schema';
 
@@ -31,6 +33,8 @@ adminRoutes.get('/stats', statsHandler);
 
 adminRoutes.get('/users', validateQuery(listUsersQuerySchema), listUsersHandler);
 adminRoutes.patch('/users/:userId/status', validateBody(updateUserStatusSchema), updateUserStatusHandler);
+
+adminRoutes.patch('/users/:userId/trusted', validateBody(setTrustedSellerSchema), setTrustedSellerHandler);
 
 adminRoutes.get('/auctions', validateQuery(listAdminAuctionsQuerySchema), listAuctionsHandler);
 adminRoutes.post('/auctions/:auctionId/moderate', validateBody(moderateAuctionSchema), moderateAuctionHandler);

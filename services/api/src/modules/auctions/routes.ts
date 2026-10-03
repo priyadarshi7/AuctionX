@@ -9,12 +9,15 @@ import {
   pauseAuctionHandler,
   publishAuctionHandler,
   startAuctionHandler,
+  submitAuctionHandler,
   updateAuctionHandler,
+  withdrawAuctionHandler,
 } from './controller';
 import {
   createAuctionSchema,
   listAuctionsQuerySchema,
   publishAuctionSchema,
+  submitAuctionSchema,
   updateAuctionSchema,
 } from './schema';
 
@@ -41,6 +44,11 @@ auctionRoutes.post(
   validateBody(publishAuctionSchema),
   publishAuctionHandler,
 );
+
+// The review-aware way to list an auction (ADR-0041): the server decides
+// whether it waits for an admin or goes straight live.
+auctionRoutes.post('/:id/submit', authenticate, validateBody(submitAuctionSchema), submitAuctionHandler);
+auctionRoutes.post('/:id/withdraw', authenticate, withdrawAuctionHandler);
 
 // No body on any of these — the action itself is the entire request.
 auctionRoutes.post('/:id/start', authenticate, startAuctionHandler);

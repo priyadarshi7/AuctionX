@@ -3,7 +3,7 @@
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
-import { listUsersRequest, setUserStatusRequest } from '@/lib/admin';
+import { listUsersRequest, setTrustedSellerRequest, setUserStatusRequest } from '@/lib/admin';
 import { ApiError } from '@/lib/apiClient';
 import type { AdminUser, UserRole, UserStatus } from '@/lib/types/admin';
 import { useDebouncedValue } from '@/lib/useDebouncedValue';
@@ -35,6 +35,13 @@ function UserRow({ user, selfId, accessToken }: { user: AdminUser; selfId: strin
   });
   const error = change.error instanceof ApiError ? change.error.message : change.error ? 'Something went wrong.' : null;
 
+  // Trusted sellers skip the review queue for low-risk categories (ADR-0041).
+  const trust = useMutation({
+    mutationFn: (trusted: boolean) => setTrustedSellerRequest(accessToken, user.id, trusted),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['admin'] }),
+  });
+  const trustError = trust.error instanceof ApiError ? trust.error.message : trust.error ? 'Something went wrong.' : null;
+
   // The server refuses both of these; hiding the buttons just avoids
   // offering an action that can only fail.
   const protectedAccount = user.role === 'ADMIN' || user.id === selfId;
@@ -47,6 +54,11 @@ function UserRow({ user, selfId, accessToken }: { user: AdminUser; selfId: strin
             {user.name}
             {user.role === 'ADMIN' && (
               <span className="ml-2 rounded-full border-2 border-line bg-cyan px-2 text-[11px] font-bold">Admin</span>
+            )}
+            {user.trustedSeller && (
+              <span className="ml-2 rounded-full border-2 border-line bg-green px-2 text-[11px] font-bold">
+                Trusted seller
+              </span>
             )}
             {user.id === selfId && <span className="ml-2 text-xs font-normal text-ink/60">(you)</span>}
           </p>
@@ -61,6 +73,17 @@ function UserRow({ user, selfId, accessToken }: { user: AdminUser; selfId: strin
           >
             {user.status}
           </span>
+          {user.role !== 'ADMIN' && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={trust.isPending}
+              onClick={() => trust.mutate(!user.trustedSeller)}
+              title="Trusted sellers skip review for everyday categories. Watches, jewelry, art and coins are always reviewed."
+            >
+              {user.trustedSeller ? 'Remove trust' : 'Mark trusted'}
+            </Button>
+          )}
           {!protectedAccount && (
             <>
               {user.status === 'ACTIVE' && (
@@ -106,7 +129,7 @@ function UserRow({ user, selfId, accessToken }: { user: AdminUser; selfId: strin
           }}
         />
       )}
-      {!pending && error && <p className="mt-2 text-sm font-medium">{error}</p>}
+      {!pending && (error ?? trustError) && <p className="mt-2 text-sm font-medium">{error ?? trustError}</p>}
     </li>
   );
 }

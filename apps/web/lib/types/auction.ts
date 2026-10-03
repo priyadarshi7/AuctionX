@@ -21,7 +21,7 @@ export type AuctionCategory = (typeof AUCTION_CATEGORIES)[number];
 export const AUCTION_CONDITIONS = ['NEW', 'LIKE_NEW', 'GOOD', 'FAIR', 'POOR'] as const;
 export type AuctionCondition = (typeof AUCTION_CONDITIONS)[number];
 
-export type AuctionStatus = 'DRAFT' | 'PUBLISHED' | 'ACTIVE' | 'PAUSED' | 'CANCELLED' | 'ENDED';
+export type AuctionStatus = 'DRAFT' | 'PENDING_REVIEW' | 'PUBLISHED' | 'ACTIVE' | 'PAUSED' | 'CANCELLED' | 'ENDED';
 
 export type Auction = {
   id: string;
@@ -38,6 +38,13 @@ export type Auction = {
   startTime: string | null;
   endTime: string | null;
   endedAt: string | null;
+  // Review stage (ADR-0041). reviewNote is the admin's rejection reason and
+  // only ever present on the seller's own draft.
+  requestedDurationSeconds: number | null;
+  submittedAt: string | null;
+  reviewedAt: string | null;
+  reviewNote: string | null;
+  heldByAdmin: boolean;
   createdAt: string;
   updatedAt: string;
 };

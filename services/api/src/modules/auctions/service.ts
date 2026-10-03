@@ -3,7 +3,10 @@ import { getCachedAuction, setCachedAuction } from '../../infrastructure/redis/a
 import { notifyAuctionChanged } from '../../infrastructure/realtime/auctionEvents';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../middleware/errors';
 import { findUserById } from '../auth/repository';
+import { countDocumentsForAuction } from '../documents/repository';
+import { currentReviewMode, requiresDocuments, requiresReview } from './reviewPolicy';
 import {
+  activateDraftRow,
   cancelAuctionRow,
   createAuction,
   findAuctionById,
@@ -11,12 +14,20 @@ import {
   pauseAuctionRow,
   publishAuctionRow,
   startAuctionRow,
+  submitAuctionRow,
   updateAuctionRow,
+  withdrawAuctionRow,
   type AuctionCursor,
   type AuctionListFilters,
   type AuctionPatch,
 } from './repository';
-import type { CreateAuctionInput, ListAuctionsQuery, PublishAuctionInput, UpdateAuctionInput } from './schema';
+import type {
+  CreateAuctionInput,
+  ListAuctionsQuery,
+  PublishAuctionInput,
+  SubmitAuctionInput,
+  UpdateAuctionInput,
+} from './schema';
 
 export type RequestingUser = { id: string; role: Role } | undefined;
 
@@ -100,6 +111,10 @@ function decodeCursor(raw: string): AuctionCursor {
 // reason to hide PUBLISHED/ACTIVE/PAUSED/CANCELLED/ENDED auctions the way
 // forgot-password hides account existence — auction ids aren't a secret,
 // and a live marketplace's whole purpose is browsability.
+// DRAFT and PENDING_REVIEW are both "not public yet" (ADR-0041): visible only
+// to the seller and admins, 404 / absent for everyone else.
+const NON_PUBLIC_STATUSES: AuctionStatus[] = ['DRAFT', 'PENDING_REVIEW'];
+
 function canSeeDraftsFor(user: RequestingUser, sellerIdFilter: string | undefined): boolean {
   if (!user) return false;
   if (user.role === 'ADMIN') return true;
@@ -116,7 +131,7 @@ export async function listPublicAuctions(
   // an error — there's nothing to validate against (DRAFT is a legal enum
   // value), the caller just isn't allowed to see any results in that state,
   // same as a search that legitimately matches zero rows.
-  if (query.status === 'DRAFT' && !allowDrafts) {
+  if (query.status !== undefined && NON_PUBLIC_STATUSES.includes(query.status) && !allowDrafts) {
     return { auctions: [], nextCursor: null };
   }
 
@@ -126,7 +141,7 @@ export async function listPublicAuctions(
     ...(query.status !== undefined
       ? { status: query.status }
       : !allowDrafts
-        ? { status: { not: 'DRAFT' } }
+        ? { status: { notIn: NON_PUBLIC_STATUSES } }
         : {}),
   };
 
@@ -164,7 +179,7 @@ export async function getAuctionForViewer(user: RequestingUser, id: string): Pro
   // sensitive), it's simply not revealing that an unpublished listing with
   // this id exists yet, consistent with keeping DRAFT invisible everywhere
   // else in this module.
-  if (auction.status === 'DRAFT' && !canSeeDraftsFor(user, auction.sellerId)) {
+  if (NON_PUBLIC_STATUSES.includes(auction.status) && !canSeeDraftsFor(user, auction.sellerId)) {
     throw new NotFoundError('Auction not found');
   }
 
@@ -184,7 +199,7 @@ export async function getAuctionForViewer(user: RequestingUser, id: string): Pro
 async function requireOwnedAuction(userId: string, auctionId: string): Promise<Auction> {
   const auction = await findAuctionById(auctionId);
 
-  if (!auction || (auction.status === 'DRAFT' && auction.sellerId !== userId)) {
+  if (!auction || (NON_PUBLIC_STATUSES.includes(auction.status) && auction.sellerId !== userId)) {
     throw new NotFoundError('Auction not found');
   }
   if (auction.sellerId !== userId) {
@@ -273,6 +288,17 @@ export async function publishExistingAuction(
     throw new ConflictError('AUCTION_NOT_PUBLISHABLE', 'Only a DRAFT auction can be published');
   }
 
+  // The review gate (ADR-0041) has to hold HERE, server-side: if only the
+  // UI routed sellers through review, anyone could call this endpoint
+  // directly and publish without it.
+  const seller = await findUserById(userId);
+  if (seller && requiresReview(currentReviewMode(), seller, auction.category)) {
+    throw new ConflictError(
+      'REVIEW_REQUIRED',
+      'This listing must be submitted for review before it can go live',
+    );
+  }
+
   // startTime defaults to "now" if the seller never scheduled one — the
   // common case of "publish and start the countdown immediately." endTime
   // has no such default: an auction with no defined end is a bid pipeline
@@ -305,13 +331,17 @@ const STARTABLE_STATUSES: AuctionStatus[] = ['PUBLISHED', 'PAUSED'];
 // "I'm abandoning this listing" is preferable to just leaving a stale DRAFT
 // row around forever, and it's consistent with never hard-deleting an
 // auction (ADR-0007's onDelete: Restrict reasoning: it's a business record).
-const CANCELLABLE_STATUSES: AuctionStatus[] = ['DRAFT', 'PUBLISHED', 'ACTIVE', 'PAUSED'];
+const CANCELLABLE_STATUSES: AuctionStatus[] = ['DRAFT', 'PENDING_REVIEW', 'PUBLISHED', 'ACTIVE', 'PAUSED'];
 
 export async function startExistingAuction(userId: string, auctionId: string): Promise<Auction> {
   const auction = await requireOwnedAuction(userId, auctionId);
 
   if (!STARTABLE_STATUSES.includes(auction.status)) {
     throw new ConflictError('AUCTION_NOT_STARTABLE', 'Only a PUBLISHED or PAUSED auction can be started');
+  }
+  // A moderator's pause is theirs to lift (ADR-0041).
+  if (auction.heldByAdmin) {
+    throw new ConflictError('AUCTION_HELD_BY_ADMIN', 'This auction was paused by a moderator and cannot be resumed by the seller');
   }
   // Nothing in this request is malformed — there's no request body at all —
   // so a stale schedule is a state conflict (409), not a validation error.
@@ -351,4 +381,68 @@ export async function cancelExistingAuction(userId: string, auctionId: string): 
   const cancelled = await cancelAuctionRow(auctionId);
   await notifyAuctionChanged(auctionId, 'lifecycle');
   return cancelled;
+}
+
+// The seller's single "I'm done, list it" action (ADR-0041). The SERVER
+// decides what that means: review required -> PENDING_REVIEW and wait for an
+// admin; not required -> straight to ACTIVE. The client sends a DURATION, not
+// an end time, so the clock starts when the auction actually goes live
+// (immediately here, or at admin approval later) rather than burning down
+// while it waits in the queue.
+export async function submitExistingAuction(
+  userId: string,
+  auctionId: string,
+  input: SubmitAuctionInput,
+): Promise<Auction> {
+  const auction = await requireOwnedAuction(userId, auctionId);
+
+  if (auction.status !== 'DRAFT') {
+    throw new ConflictError('AUCTION_NOT_SUBMITTABLE', 'Only a DRAFT auction can be submitted');
+  }
+
+  const seller = await findUserById(userId);
+  if (!seller || !seller.emailVerifiedAt) {
+    throw new ForbiddenError('Verify your email before listing an auction', 'EMAIL_NOT_VERIFIED');
+  }
+  if (seller.status !== 'ACTIVE') {
+    throw new ForbiddenError('Your account is not active', 'ACCOUNT_DISABLED');
+  }
+
+  const needsReview = requiresReview(currentReviewMode(), seller, auction.category);
+
+  if (needsReview && requiresDocuments(auction.category) && (await countDocumentsForAuction(auctionId)) === 0) {
+    throw new ConflictError(
+      'DOCUMENTS_REQUIRED',
+      'Add at least one supporting document (certificate, receipt or provenance) for this category',
+    );
+  }
+
+  let result: Auction | null;
+  if (needsReview) {
+    result = await submitAuctionRow(auctionId, input.durationSeconds);
+  } else {
+    const now = new Date();
+    result = await activateDraftRow(auctionId, {
+      startTime: now,
+      endTime: new Date(now.getTime() + input.durationSeconds * 1000),
+    });
+  }
+  if (!result) {
+    throw new ConflictError('AUCTION_NOT_SUBMITTABLE', 'This auction can no longer be submitted');
+  }
+  await notifyAuctionChanged(auctionId, 'lifecycle');
+  return result;
+}
+
+// Pulls a submitted listing back to DRAFT so the seller can fix it without
+// waiting for a rejection. Guarded: if an admin approves it in the same
+// instant, one of the two wins cleanly and the loser gets a 409.
+export async function withdrawExistingAuction(userId: string, auctionId: string): Promise<Auction> {
+  await requireOwnedAuction(userId, auctionId);
+  const withdrawn = await withdrawAuctionRow(auctionId);
+  if (!withdrawn) {
+    throw new ConflictError('AUCTION_NOT_WITHDRAWABLE', 'Only an auction awaiting review can be withdrawn');
+  }
+  await notifyAuctionChanged(auctionId, 'lifecycle');
+  return withdrawn;
 }

@@ -115,6 +115,27 @@ describe('POST /api/v1/admin/auctions/:id/moderate', () => {
     expect(moderated[0]!.payload).toMatchObject({ sellerId: seller.id, action: 'pause', reason: 'Suspicious listing' });
   });
 
+  it('a seller cannot lift a moderator’s pause, but can still resume their own pause', async () => {
+    const admin = await createAdmin();
+    const seller = await createUser('seller');
+    const auctionId = await createAuction(seller.accessToken);
+    const sellerStart = () =>
+      request(app).post(`/api/v1/auctions/${auctionId}/start`).set('Authorization', `Bearer ${seller.accessToken}`);
+
+    await moderate(admin.accessToken, auctionId, { action: 'pause', reason: 'Under investigation' });
+    const blocked = await sellerStart();
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error.code).toBe('AUCTION_HELD_BY_ADMIN');
+    expect((await prisma.auction.findUniqueOrThrow({ where: { id: auctionId } })).status).toBe('PAUSED');
+
+    await moderate(admin.accessToken, auctionId, { action: 'resume' });
+    expect((await prisma.auction.findUniqueOrThrow({ where: { id: auctionId } })).heldByAdmin).toBe(false);
+
+    // The seller's OWN pause is theirs to resume.
+    await request(app).post(`/api/v1/auctions/${auctionId}/pause`).set('Authorization', `Bearer ${seller.accessToken}`);
+    expect((await sellerStart()).status).toBe(200);
+  });
+
   it('a paused auction rejects bids, and resume brings it back (no reason needed)', async () => {
     const admin = await createAdmin();
     const seller = await createUser('seller');

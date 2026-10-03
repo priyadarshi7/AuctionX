@@ -12,7 +12,7 @@ import { findValuationByAuctionId, requestValuationInTx } from './repository';
 // is simpler than widening that module's public surface for one caller.
 async function requireOwnedAuction(userId: string, auctionId: string) {
   const auction = await findAuctionById(auctionId);
-  if (!auction || (auction.status === 'DRAFT' && auction.sellerId !== userId)) {
+  if (!auction || ((auction.status === 'DRAFT' || auction.status === 'PENDING_REVIEW') && auction.sellerId !== userId)) {
     throw new NotFoundError('Auction not found');
   }
   if (auction.sellerId !== userId) {
