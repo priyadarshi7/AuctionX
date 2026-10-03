@@ -72,7 +72,7 @@ export default function MyAuctionsPage() {
               role="tab"
               aria-selected={selected}
               onClick={() => setFilter(f.id)}
-              className={`rounded-full border-2 border-ink px-4 py-1.5 text-sm font-semibold transition-colors ${
+              className={`rounded-full border-2 border-line px-4 py-1.5 text-sm font-semibold transition-colors ${
                 selected ? 'bg-ink text-cream' : 'bg-white hover:bg-cream-2'
               }`}
             >
@@ -101,7 +101,7 @@ export default function MyAuctionsPage() {
             <button
               type="button"
               onClick={() => void refetch()}
-              className="rounded-full border-2 border-ink bg-white px-5 py-2 text-sm font-semibold shadow-hard-sm"
+              className="rounded-full border-2 border-line bg-white px-5 py-2 text-sm font-semibold shadow-hard-sm"
             >
               Try again
             </button>

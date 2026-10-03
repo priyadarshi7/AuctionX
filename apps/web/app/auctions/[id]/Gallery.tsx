@@ -12,7 +12,7 @@ export function Gallery({ images, title }: { images: string[]; title: string }) 
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="aspect-square overflow-hidden rounded-2xl border-2 border-ink bg-cream-2 shadow-hard-sm">
+      <div className="aspect-square overflow-hidden rounded-2xl border-2 border-line bg-cream-2 shadow-hard-sm">
         {current ? (
           // Storage domain isn't fixed yet (local s3mock vs. prod R2), so
           // next/image's remotePatterns can't be configured until
@@ -35,7 +35,7 @@ export function Gallery({ images, title }: { images: string[]; title: string }) 
               aria-label={`Show photo ${i + 1} of ${images.length}`}
               aria-pressed={i === index}
               onClick={() => setIndex(i)}
-              className={`h-16 w-16 shrink-0 overflow-hidden rounded-xl border-2 border-ink transition-opacity ${
+              className={`h-16 w-16 shrink-0 overflow-hidden rounded-xl border-2 border-line transition-opacity ${
                 i === index ? 'shadow-hard-sm' : 'opacity-60 hover:opacity-100'
               }`}
             >

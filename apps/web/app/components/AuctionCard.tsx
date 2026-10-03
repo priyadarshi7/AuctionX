@@ -20,9 +20,9 @@ export function AuctionCard({ auction }: { auction: AuctionCardData }) {
   return (
     <Link
       href={`/auctions/${auction.id}`}
-      className="group flex flex-col overflow-hidden rounded-2xl border-2 border-ink bg-white shadow-hard-sm transition-transform hover:-translate-y-1 hover:shadow-hard"
+      className="group flex flex-col overflow-hidden rounded-2xl border-2 border-line bg-white shadow-hard-sm transition-transform hover:-translate-y-1 hover:shadow-hard"
     >
-      <div className="relative aspect-square w-full overflow-hidden border-b-2 border-ink bg-cream-2">
+      <div className="relative aspect-square w-full overflow-hidden border-b-2 border-line bg-cream-2">
         {auction.images[0] ? (
           // Storage domain isn't fixed yet (local s3mock vs. prod R2), so
           // next/image's remotePatterns can't be configured until
@@ -38,11 +38,11 @@ export function AuctionCard({ auction }: { auction: AuctionCardData }) {
             <Mascot className="h-20 w-20 opacity-70" />
           </div>
         )}
-        <span className="absolute left-2 top-2 rounded-full border-2 border-ink bg-cream px-2 py-0.5 text-xs font-semibold">
+        <span className="absolute left-2 top-2 rounded-full border-2 border-line bg-cream px-2 py-0.5 text-xs font-semibold">
           {display.emoji} {display.label}
         </span>
         {auction.status === 'ACTIVE' && (
-          <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full border-2 border-ink bg-green px-2 py-0.5 text-xs font-semibold text-ink">
+          <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full border-2 border-line bg-green px-2 py-0.5 text-xs font-semibold text-ink">
             <span className="h-1.5 w-1.5 rounded-full bg-ink" />
             {timeRemaining}
           </span>

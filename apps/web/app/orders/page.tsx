@@ -61,7 +61,7 @@ export default function OrdersPage() {
             role="tab"
             aria-selected={filter === t.id}
             onClick={() => setFilter(t.id)}
-            className={`rounded-full border-2 border-ink px-4 py-1.5 text-sm font-semibold transition-colors ${
+            className={`rounded-full border-2 border-line px-4 py-1.5 text-sm font-semibold transition-colors ${
               filter === t.id ? 'bg-ink text-cream' : 'bg-white hover:bg-cream-2'
             }`}
           >
@@ -101,11 +101,11 @@ export default function OrdersPage() {
             <li key={order.id}>
               <Link
                 href={`/orders/${order.id}`}
-                className="group flex flex-wrap items-center justify-between gap-4 rounded-2xl border-2 border-ink bg-white p-4 shadow-hard-sm transition-transform hover:-translate-y-0.5 hover:shadow-hard"
+                className="group flex flex-wrap items-center justify-between gap-4 rounded-2xl border-2 border-line bg-white p-4 shadow-hard-sm transition-transform hover:-translate-y-0.5 hover:shadow-hard"
               >
                 <div className="flex items-center gap-4">
                   <span
-                    className={`flex h-12 w-12 items-center justify-center rounded-full border-2 border-ink font-display text-sm font-extrabold ${
+                    className={`flex h-12 w-12 items-center justify-center rounded-full border-2 border-line font-display text-sm font-extrabold ${
                       buying ? 'bg-yellow' : 'bg-cyan'
                     }`}
                   >
@@ -124,7 +124,7 @@ export default function OrdersPage() {
                   <OrderStatusPill status={order.status} />
                   <p className="font-display text-xl font-extrabold">{formatCents(order.amountCents)}</p>
                   {needsPayment && (
-                    <span className="rounded-full border-2 border-ink bg-yellow px-3 py-1 text-sm font-bold">Pay now</span>
+                    <span className="rounded-full border-2 border-line bg-yellow px-3 py-1 text-sm font-bold">Pay now</span>
                   )}
                 </div>
               </Link>

@@ -35,7 +35,7 @@ export function ValuationPanel({ auctionId, accessToken }: { auctionId: string; 
 
   if (valuationQuery.isLoading) {
     return (
-      <div className="rounded-2xl border-2 border-ink bg-cream-2 p-5 shadow-hard-sm">
+      <div className="rounded-2xl border-2 border-line bg-cream-2 p-5 shadow-hard-sm">
         <p className="text-sm text-ink/60">Loading AI valuation…</p>
       </div>
     );
@@ -52,7 +52,7 @@ export function ValuationPanel({ auctionId, accessToken }: { auctionId: string; 
   const regenerateError = regenerate.error instanceof ApiError ? regenerate.error.message : null;
 
   return (
-    <div className="rounded-2xl border-2 border-ink bg-cream-2 p-5 shadow-hard-sm">
+    <div className="rounded-2xl border-2 border-line bg-cream-2 p-5 shadow-hard-sm">
       <div className="mb-3 flex items-center justify-between gap-2">
         <h2 className="font-display text-lg font-extrabold">AI Valuation</h2>
         <ValuationStatusPill status={valuation.status} />

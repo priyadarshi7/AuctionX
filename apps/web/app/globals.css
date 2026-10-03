@@ -1,9 +1,22 @@
 @import "tailwindcss";
 
+/* Single light theme. Colours are still named by role so components say
+   what a colour is for, not its hex:
+     --ink      foreground: body text and inverse surfaces (bg-ink)
+     --line     every 2px outline and hard shadow
+     --cream    page ground        --cream-2  recessed wells / hover fills
+     --white    raised surfaces (cards, nav track, panels)
+     --band     dark bands (marquee, CTA) with --band-fg text */
 :root {
+  color-scheme: light;
   --ink: #14141a;
+  --line: #14141a;
   --cream: #faf6ec;
   --cream-2: #f3ecdb;
+  --white: #ffffff;
+  --band: #14141a;
+  --band-fg: #faf6ec;
+  --grid-line: rgba(20, 20, 26, 0.06);
   --yellow: #f5c94b;
   --pink: #ff5c8a;
   --cyan: #66d9e8;
@@ -12,6 +25,10 @@
 
 @theme inline {
   --color-ink: var(--ink);
+  --color-line: var(--line);
+  --color-white: var(--white);
+  --color-band: var(--band);
+  --color-band-fg: var(--band-fg);
   --color-cream: var(--cream);
   --color-cream-2: var(--cream-2);
   --color-yellow: var(--yellow);
@@ -32,8 +49,8 @@ body {
    reads as texture, not as an actual layout grid. */
 .bg-grid {
   background-image:
-    linear-gradient(to right, rgba(20, 20, 26, 0.06) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(20, 20, 26, 0.06) 1px, transparent 1px);
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
   background-size: 40px 40px;
 }
 
@@ -49,11 +66,11 @@ body {
    and sticky notes throughout the reference design, instead of a soft
    drop-shadow. */
 .shadow-hard {
-  box-shadow: 4px 4px 0 0 var(--ink);
+  box-shadow: 4px 4px 0 0 var(--line);
 }
 
 .shadow-hard-sm {
-  box-shadow: 2px 2px 0 0 var(--ink);
+  box-shadow: 2px 2px 0 0 var(--line);
 }
 
 /* ---- Home page motion ---- */
@@ -76,9 +93,27 @@ body {
 .faq-icon { transition: transform 0.2s ease; }
 
 /* Keyboard focus: solid ink ring, visible on cream, white, yellow and pink. */
-:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+:focus-visible { outline: 3px solid var(--line); outline-offset: 2px; }
 
 @media (prefers-reduced-motion: reduce) {
   .reveal { opacity: 1; transform: none; transition: none; }
   .marquee-track, .pulse-ring, .step-in, .faq-icon { animation: none; transition: none; }
+}
+
+/* ---- Hero backdrop ---- */
+
+@keyframes float-a { 0%, 100% { transform: translateY(0) rotate(var(--r, 0deg)); } 50% { transform: translateY(-16px) rotate(calc(var(--r, 0deg) + 6deg)); } }
+@keyframes float-b { 0%, 100% { transform: translateY(0) rotate(var(--r, 0deg)); } 50% { transform: translateY(14px) rotate(calc(var(--r, 0deg) - 8deg)); } }
+.float-a { animation: float-a 7s ease-in-out infinite; transform: rotate(var(--r, 0deg)); }
+.float-b { animation: float-b 8s ease-in-out infinite; transform: rotate(var(--r, 0deg)); }
+
+@keyframes bid-rise { 0% { opacity: 0; transform: translateY(24px) scale(0.85); } 14% { opacity: 1; transform: translateY(0) scale(1); } 72% { opacity: 1; } 100% { opacity: 0; transform: translateY(-120px) scale(1); } }
+.bid-pop { opacity: 0; animation: bid-rise 8s ease-out infinite; }
+
+@keyframes rays-spin { to { transform: rotate(360deg); } }
+.rays { animation: rays-spin 120s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .float-a, .float-b, .rays { animation: none; }
+  .bid-pop { display: none; }
 }

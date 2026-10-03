@@ -87,24 +87,24 @@ export default function Home() {
         <Faq />
       </Reveal>
 
-      <section className="border-t-2 border-ink bg-ink py-16 text-cream">
+      <section className="border-t-2 border-line bg-band py-16 text-band-fg">
         <div className="mx-auto flex max-w-6xl flex-col items-start gap-4 px-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="font-display text-3xl font-extrabold sm:text-4xl">Ready to bid?</h2>
-            <p className="mt-1 text-cream/70">
+            <p className="mt-1 text-band-fg/70">
               {signedIn ? 'The floor is open. Go find your next win.' : 'It takes about a minute to make an account.'}
             </p>
           </div>
           <div className="flex gap-3">
             <Link
               href="/auctions"
-              className="rounded-full border-2 border-cream px-6 py-3 font-display font-bold hover:bg-cream/10"
+              className="rounded-full border-2 border-band-fg px-6 py-3 font-display font-bold hover:bg-band-fg/10"
             >
               Browse auctions
             </Link>
             <Link
               href={signedIn ? '/auctions/new' : '/register'}
-              className="rounded-full border-2 border-ink bg-yellow px-6 py-3 font-display font-bold text-ink shadow-hard transition-transform hover:-translate-y-0.5"
+              className="rounded-full border-2 border-line bg-yellow px-6 py-3 font-display font-bold text-ink shadow-hard transition-transform hover:-translate-y-0.5"
             >
               {signedIn ? 'Sell an item' : 'Get started'}
             </Link>

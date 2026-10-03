@@ -5,7 +5,7 @@ type Variant = 'primary' | 'secondary' | 'danger' | 'ghost';
 type Size = 'md' | 'sm';
 
 const BASE =
-  'inline-flex items-center justify-center gap-2 rounded-full border-2 border-ink font-display font-bold transition-[transform,background-color] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0';
+  'inline-flex items-center justify-center gap-2 rounded-full border-2 border-line font-display font-bold transition-[transform,background-color] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0';
 
 const VARIANTS: Record<Variant, string> = {
   primary: 'bg-yellow shadow-hard-sm hover:-translate-y-0.5 hover:shadow-hard',

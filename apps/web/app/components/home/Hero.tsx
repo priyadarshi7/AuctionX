@@ -14,9 +14,9 @@ function Spotlight({ auction }: { auction: Auction }) {
   return (
     <Link
       href={`/auctions/${auction.id}`}
-      className="group block w-full max-w-sm rotate-2 rounded-2xl border-2 border-ink bg-white shadow-hard transition-transform hover:-translate-y-1 hover:rotate-0"
+      className="group block w-full max-w-sm rotate-2 rounded-2xl border-2 border-line bg-white shadow-hard transition-transform hover:-translate-y-1 hover:rotate-0"
     >
-      <div className="relative aspect-4/3 overflow-hidden rounded-t-[14px] border-b-2 border-ink bg-cream-2">
+      <div className="relative aspect-4/3 overflow-hidden rounded-t-[14px] border-b-2 border-line bg-cream-2">
         {auction.images[0] ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -29,7 +29,7 @@ function Spotlight({ auction }: { auction: Auction }) {
             <Mascot className="h-24 w-24 opacity-70" />
           </div>
         )}
-        <span className="absolute left-3 top-3 rounded-full border-2 border-ink bg-cream px-2.5 py-0.5 text-xs font-semibold">
+        <span className="absolute left-3 top-3 rounded-full border-2 border-line bg-cream px-2.5 py-0.5 text-xs font-semibold">
           Ending soonest
         </span>
       </div>
@@ -41,7 +41,7 @@ function Spotlight({ auction }: { auction: Auction }) {
             <p className="font-display text-2xl font-extrabold">{formatCents(auction.currentPriceCents)}</p>
           </div>
           <span
-            className={`flex items-center gap-1.5 rounded-full border-2 border-ink px-3 py-1 font-display text-sm font-bold tabular-nums ${
+            className={`flex items-center gap-1.5 rounded-full border-2 border-line px-3 py-1 font-display text-sm font-bold tabular-nums ${
               urgent ? 'bg-pink' : 'bg-green'
             }`}
           >
@@ -49,7 +49,7 @@ function Spotlight({ auction }: { auction: Auction }) {
             {timeRemaining}
           </span>
         </div>
-        <span className="rounded-full border-2 border-ink bg-yellow py-2 text-center font-display font-bold shadow-hard-sm">
+        <span className="rounded-full border-2 border-line bg-yellow py-2 text-center font-display font-bold shadow-hard-sm">
           Place a bid
         </span>
       </div>
@@ -71,13 +71,13 @@ export function Hero({
     .sort((a, b) => new Date(a.endTime!).getTime() - new Date(b.endTime!).getTime())[0];
 
   return (
-    <section className="bg-grid relative overflow-hidden border-b-2 border-ink">
+    <section className="bg-grid relative overflow-hidden border-b-2 border-line">
       <div className="mx-auto grid max-w-6xl items-center gap-12 px-6 py-16 sm:py-24 lg:grid-cols-[1.25fr_1fr]">
         <div className="flex flex-col gap-7">
-          <span className="flex w-fit items-center gap-2 rounded-full border-2 border-ink bg-white px-4 py-1.5 text-sm font-semibold shadow-hard-sm">
+          <span className="flex w-fit items-center gap-2 rounded-full border-2 border-line bg-white px-4 py-1.5 text-sm font-semibold shadow-hard-sm">
             <span className="relative flex h-2.5 w-2.5">
               <span className="pulse-ring absolute inline-flex h-full w-full rounded-full bg-green" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full border border-ink bg-green" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full border border-line bg-green" />
             </span>
             {loading
               ? 'Live bidding, in real time'
@@ -100,13 +100,13 @@ export function Hero({
           <div className="flex flex-wrap items-center gap-3">
             <Link
               href="/auctions"
-              className="rounded-full border-2 border-ink bg-yellow px-6 py-3 font-display font-bold shadow-hard transition-transform hover:-translate-y-0.5"
+              className="rounded-full border-2 border-line bg-yellow px-6 py-3 font-display font-bold shadow-hard transition-transform hover:-translate-y-0.5"
             >
               Browse auctions
             </Link>
             <Link
               href={signedIn ? '/auctions/new' : '/register'}
-              className="rounded-full border-2 border-ink bg-white px-6 py-3 font-display font-bold transition-transform hover:-translate-y-0.5"
+              className="rounded-full border-2 border-line bg-white px-6 py-3 font-display font-bold transition-transform hover:-translate-y-0.5"
             >
               {signedIn ? 'Sell an item' : 'Create an account'}
             </Link>
@@ -123,14 +123,14 @@ export function Hero({
           {loading && (
             <div
               aria-hidden
-              className="h-96 w-full max-w-sm rotate-2 animate-pulse rounded-2xl border-2 border-ink bg-white shadow-hard"
+              className="h-96 w-full max-w-sm rotate-2 animate-pulse rounded-2xl border-2 border-line bg-white shadow-hard"
             />
           )}
           {!loading && spotlight && <Spotlight auction={spotlight} />}
           {!loading && !spotlight && (
             <div className="flex flex-col items-center gap-4">
               <Mascot className="h-40 w-40" />
-              <div className="-rotate-2 rounded-xl border-2 border-ink bg-cream-2 px-4 py-2 font-hand text-xl shadow-hard-sm">
+              <div className="-rotate-2 rounded-xl border-2 border-line bg-cream-2 px-4 py-2 font-hand text-xl shadow-hard-sm">
                 the floor&apos;s quiet &mdash; list something!
               </div>
             </div>

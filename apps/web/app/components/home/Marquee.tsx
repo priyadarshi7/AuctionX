@@ -20,7 +20,7 @@ export function Marquee() {
   );
 
   return (
-    <div className="marquee overflow-hidden border-b-2 border-ink bg-ink py-3 text-cream">
+    <div className="marquee overflow-hidden border-b-2 border-line bg-band py-3 text-band-fg">
       <div className="marquee-track flex w-max">
         {row(false)}
         {row(true)}

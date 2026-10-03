@@ -4,7 +4,7 @@ import type { ComponentProps, ReactNode } from 'react';
 // a "!" message underneath. Colour is never the only signal — the message
 // text and icon carry it (and aria-invalid tells assistive tech).
 export function inputClass(hasError: boolean): string {
-  return `w-full rounded-xl border-2 border-ink bg-white px-3.5 py-2.5 text-base placeholder:text-ink/50 transition-shadow disabled:opacity-60 ${
+  return `w-full rounded-xl border-2 border-line bg-white px-3.5 py-2.5 text-base placeholder:text-ink/50 transition-shadow disabled:opacity-60 ${
     hasError ? 'shadow-[3px_3px_0_0_var(--pink)]' : 'focus:shadow-hard-sm'
   }`;
 }
@@ -37,7 +37,7 @@ export function Field({
         <p id={`${htmlFor}-error`} className="mt-1.5 flex items-center gap-1.5 text-sm font-medium">
           <span
             aria-hidden
-            className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 border-ink bg-pink text-[10px] font-extrabold leading-none"
+            className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 border-line bg-pink text-[10px] font-extrabold leading-none"
           >
             !
           </span>

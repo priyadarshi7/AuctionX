@@ -30,7 +30,7 @@ const VALUATION: Record<ValuationStatus, { label: string; cls: string }> = {
 
 function Pill({ label, cls }: { label: string; cls: string }) {
   return (
-    <span className={`inline-flex items-center rounded-full border-2 border-ink px-2.5 py-0.5 text-xs font-semibold ${cls}`}>
+    <span className={`inline-flex items-center rounded-full border-2 border-line px-2.5 py-0.5 text-xs font-semibold ${cls}`}>
       {label}
     </span>
   );

@@ -86,6 +86,6 @@ export const CATEGORY_ORDER: AuctionCategory[] = [
 export const THEME_CLASSES: Record<CategoryTheme, { bg: string; text: string; border: string }> = {
   yellow: { bg: 'bg-yellow', text: 'text-ink', border: 'border-ink' },
   pink: { bg: 'bg-pink', text: 'text-ink', border: 'border-ink' },
-  ink: { bg: 'bg-ink', text: 'text-cream', border: 'border-ink' },
+  ink: { bg: 'bg-ink', text: 'text-cream', border: 'border-line' },
   cream: { bg: 'bg-cream-2', text: 'text-ink', border: 'border-ink' },
 };

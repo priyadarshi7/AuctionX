@@ -13,10 +13,10 @@ const TONES: Record<Tone, { chip: string; icon: string; role: 'alert' | 'status'
 export function Notice({ tone = 'info', children }: { tone?: Tone; children: ReactNode }) {
   const t = TONES[tone];
   return (
-    <div role={t.role} className="flex items-start gap-3 rounded-xl border-2 border-ink bg-white p-3 text-sm shadow-hard-sm">
+    <div role={t.role} className="flex items-start gap-3 rounded-xl border-2 border-line bg-white p-3 text-sm shadow-hard-sm">
       <span
         aria-hidden
-        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-ink text-[11px] font-extrabold leading-none ${t.chip}`}
+        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-line text-[11px] font-extrabold leading-none ${t.chip}`}
       >
         {t.icon}
       </span>

@@ -37,16 +37,16 @@ export function NavBar() {
   };
 
   return (
-    <header className="sticky top-0 z-20 border-b-2 border-ink bg-cream/95 px-4 py-3 backdrop-blur">
+    <header className="sticky top-0 z-20 border-b-2 border-line bg-cream/95 px-4 py-3 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
         <Link href="/" className="flex items-center gap-2 font-display text-xl font-extrabold tracking-tight">
-          <span className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-ink bg-yellow text-sm">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-line bg-yellow text-sm">
             {'\u{1FA99}'}
           </span>
           AuctionX
         </Link>
 
-        <nav className="hidden items-center gap-1 rounded-full border-2 border-ink bg-white px-1.5 py-1.5 sm:flex">
+        <nav className="hidden items-center gap-1 rounded-full border-2 border-line bg-white px-1.5 py-1.5 sm:flex">
           <NavLink href="/auctions">Browse</NavLink>
           {status === 'authenticated' && (
             <>
@@ -65,14 +65,14 @@ export function NavBar() {
               <Link
                 href="/account"
                 title="Account"
-                className="hidden items-center justify-center rounded-full border-2 border-ink bg-pink h-8 w-8 text-xs font-bold hover:brightness-95 sm:flex"
+                className="hidden items-center justify-center rounded-full border-2 border-line bg-pink h-8 w-8 text-xs font-bold hover:brightness-95 sm:flex"
               >
                 {user.name.charAt(0).toUpperCase()}
               </Link>
               <button
                 type="button"
                 onClick={handleLogout}
-                className="rounded-full border-2 border-ink px-3 py-1.5 text-sm font-medium hover:bg-cream-2"
+                className="rounded-full border-2 border-line px-3 py-1.5 text-sm font-medium hover:bg-cream-2"
               >
                 Log out
               </button>
@@ -85,7 +85,7 @@ export function NavBar() {
               </Link>
               <Link
                 href="/register"
-                className="rounded-full border-2 border-ink bg-yellow px-3 py-1.5 text-sm font-semibold shadow-hard-sm transition-transform hover:-translate-y-0.5"
+                className="rounded-full border-2 border-line bg-yellow px-3 py-1.5 text-sm font-semibold shadow-hard-sm transition-transform hover:-translate-y-0.5"
               >
                 Register
               </Link>

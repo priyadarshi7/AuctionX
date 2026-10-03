@@ -51,7 +51,7 @@ export function SetPriceAndPublishPanel({ auctionId, accessToken }: { auctionId:
   const publishError = publish.error instanceof ApiError ? publish.error.message : publish.error ? 'Something went wrong.' : null;
 
   return (
-    <div className="rounded-2xl border-2 border-ink bg-white p-5 shadow-hard">
+    <div className="rounded-2xl border-2 border-line bg-white p-5 shadow-hard">
       <h2 className="font-display text-lg font-extrabold">Set your price</h2>
       <p className="mt-1 text-sm text-ink/70">
         This draft is only visible to you. Use the AI valuation above as a rough guide, set your own price, then

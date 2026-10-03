@@ -44,7 +44,7 @@ export function HowItWorks({ signedIn }: { signedIn: boolean }) {
     <section className="mx-auto max-w-6xl px-6 py-16">
       <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <h2 className="font-display text-3xl font-extrabold sm:text-4xl">How it works</h2>
-        <div role="tablist" aria-label="How it works for" className="flex rounded-full border-2 border-ink bg-white p-1">
+        <div role="tablist" aria-label="How it works for" className="flex rounded-full border-2 border-line bg-white p-1">
           {(['buy', 'sell'] as const).map((r) => (
             <button
               key={r}
@@ -73,10 +73,10 @@ export function HowItWorks({ signedIn }: { signedIn: boolean }) {
         {steps.map((step, i) => (
           <div
             key={`${role}-${i}`}
-            className="step-in rounded-2xl border-2 border-ink bg-white p-5 shadow-hard-sm"
+            className="step-in rounded-2xl border-2 border-line bg-white p-5 shadow-hard-sm"
             style={{ animationDelay: `${i * 80}ms` }}
           >
-            <span className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-ink bg-cyan font-display font-extrabold">
+            <span className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-line bg-cyan font-display font-extrabold">
               {i + 1}
             </span>
             <p className="mt-3 font-display text-lg font-bold">{step.title}</p>
@@ -88,7 +88,7 @@ export function HowItWorks({ signedIn }: { signedIn: boolean }) {
       <div className="mt-6">
         <Link
           href={role === 'buy' ? '/auctions' : signedIn ? '/auctions/new' : '/register'}
-          className="inline-block rounded-full border-2 border-ink bg-yellow px-6 py-2.5 font-display font-bold shadow-hard-sm transition-transform hover:-translate-y-0.5"
+          className="inline-block rounded-full border-2 border-line bg-yellow px-6 py-2.5 font-display font-bold shadow-hard-sm transition-transform hover:-translate-y-0.5"
         >
           {role === 'buy' ? 'Start browsing' : signedIn ? 'List an item' : 'Create an account to sell'}
         </Link>

@@ -35,7 +35,7 @@ export function PageMessage({
   mascotColor?: string;
 }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-ink/30 px-6 py-14 text-center">
+    <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-line/30 px-6 py-14 text-center">
       <Mascot className="h-16 w-16" color={mascotColor} />
       <p className="font-display text-xl font-bold">{title}</p>
       {body && <p className="max-w-md text-ink/70">{body}</p>}

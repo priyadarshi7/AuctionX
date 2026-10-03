@@ -20,7 +20,7 @@ export function LiveAuctions({
   const label = category ? CATEGORY_DISPLAY[category].label : 'every category';
 
   return (
-    <section id="live" className="scroll-mt-20 border-y-2 border-ink bg-cream-2 py-16">
+    <section id="live" className="scroll-mt-20 border-y-2 border-line bg-cream-2 py-16">
       <div className="mx-auto max-w-6xl px-6">
         <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -43,7 +43,7 @@ export function LiveAuctions({
             type="button"
             aria-pressed={category === ''}
             onClick={() => onCategoryChange('')}
-            className={`shrink-0 rounded-full border-2 border-ink px-4 py-1.5 text-sm font-semibold transition-colors ${
+            className={`shrink-0 rounded-full border-2 border-line px-4 py-1.5 text-sm font-semibold transition-colors ${
               category === '' ? 'bg-ink text-cream' : 'bg-white hover:bg-cream'
             }`}
           >
@@ -59,7 +59,7 @@ export function LiveAuctions({
                 type="button"
                 aria-pressed={active}
                 onClick={() => onCategoryChange(active ? '' : c)}
-                className={`shrink-0 rounded-full border-2 border-ink px-4 py-1.5 text-sm font-semibold transition-colors ${
+                className={`shrink-0 rounded-full border-2 border-line px-4 py-1.5 text-sm font-semibold transition-colors ${
                   active ? `${theme.bg} ${theme.text}` : 'bg-white hover:bg-cream'
                 }`}
               >
@@ -70,12 +70,12 @@ export function LiveAuctions({
         </div>
 
         {query.isError && (
-          <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-ink/30 py-12 text-center">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-line/30 py-12 text-center">
             <p className="text-ink/70">Couldn&apos;t load live auctions.</p>
             <button
               type="button"
               onClick={() => void query.refetch()}
-              className="rounded-full border-2 border-ink bg-white px-5 py-2 text-sm font-semibold shadow-hard-sm transition-transform hover:-translate-y-0.5"
+              className="rounded-full border-2 border-line bg-white px-5 py-2 text-sm font-semibold shadow-hard-sm transition-transform hover:-translate-y-0.5"
             >
               Try again
             </button>
@@ -91,7 +91,7 @@ export function LiveAuctions({
         )}
 
         {query.isSuccess && auctions.length === 0 && (
-          <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-ink/30 py-12 text-center">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-line/30 py-12 text-center">
             <Mascot className="h-16 w-16" color="#ff5c8a" />
             <p className="text-ink/70">Nothing live in {label} this second.</p>
             <div className="flex gap-4 text-sm font-semibold">

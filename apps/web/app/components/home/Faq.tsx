@@ -24,12 +24,12 @@ export function Faq() {
       <h2 className="mb-6 font-display text-3xl font-extrabold sm:text-4xl">Good questions</h2>
       <div className="flex flex-col gap-3">
         {QUESTIONS.map((item) => (
-          <details key={item.q} className="faq rounded-2xl border-2 border-ink bg-white shadow-hard-sm open:bg-cream-2">
+          <details key={item.q} className="faq rounded-2xl border-2 border-line bg-white shadow-hard-sm open:bg-cream-2">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-2xl px-5 py-4 font-display text-lg font-bold">
               {item.q}
               <span
                 aria-hidden
-                className="faq-icon flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 border-ink bg-yellow text-base leading-none"
+                className="faq-icon flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 border-line bg-yellow text-base leading-none"
               >
                 +
               </span>

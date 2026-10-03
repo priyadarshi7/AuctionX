@@ -35,7 +35,7 @@ function Timeline({ order }: { order: Order }) {
         <li key={step.label} className="flex items-start gap-4">
           <span
             aria-hidden
-            className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-ink text-sm font-extrabold ${
+            className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-line text-sm font-extrabold ${
               step.state === 'done' ? 'bg-green' : step.state === 'current' ? 'bg-yellow' : 'bg-white text-ink/50'
             }`}
           >
@@ -118,7 +118,7 @@ export default function OrderDetailPage() {
       </nav>
 
       <div className="grid gap-6 sm:grid-cols-[1fr_1.2fr]">
-        <div className="rounded-2xl border-2 border-ink bg-white p-6 shadow-hard">
+        <div className="rounded-2xl border-2 border-line bg-white p-6 shadow-hard">
           <p className="text-xs font-semibold uppercase tracking-wide text-ink/60">Amount</p>
           <p className="font-display text-4xl font-extrabold">{formatCents(order.amountCents)}</p>
           <div className="mt-3 flex items-center gap-2">
@@ -146,7 +146,7 @@ export default function OrderDetailPage() {
           </div>
         </div>
 
-        <div className="rounded-2xl border-2 border-ink bg-cream-2 p-6">
+        <div className="rounded-2xl border-2 border-line bg-cream-2 p-6">
           <h2 className="mb-5 font-display text-xl font-extrabold">Progress</h2>
           <Timeline order={order} />
         </div>

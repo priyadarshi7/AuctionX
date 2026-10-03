@@ -24,14 +24,14 @@ export function AuthShell({
 }) {
   return (
     <main className="mx-auto grid w-full max-w-6xl flex-1 items-center gap-10 px-6 py-10 lg:grid-cols-2 lg:py-16">
-      <div className="mx-auto w-full max-w-md rounded-2xl border-2 border-ink bg-white p-6 shadow-hard sm:p-8">
+      <div className="mx-auto w-full max-w-md rounded-2xl border-2 border-line bg-white p-6 shadow-hard sm:p-8">
         <h1 className="font-display text-3xl font-extrabold tracking-tight">{title}</h1>
         <p className="mt-1 text-ink/70">{subtitle}</p>
         <div className="mt-6">{children}</div>
-        <p className="mt-6 border-t-2 border-ink/10 pt-4 text-sm text-ink/70">{footer}</p>
+        <p className="mt-6 border-t-2 border-line/10 pt-4 text-sm text-ink/70">{footer}</p>
       </div>
 
-      <aside className="bg-grid hidden flex-col items-start gap-6 rounded-2xl border-2 border-ink bg-cream-2 p-10 lg:flex">
+      <aside className="bg-grid hidden flex-col items-start gap-6 rounded-2xl border-2 border-line bg-cream-2 p-10 lg:flex">
         <Mascot className="h-28 w-28" />
         <h2 className="font-display text-3xl font-extrabold leading-tight">{panelTitle}</h2>
         <ul className="flex flex-col gap-3">
@@ -39,7 +39,7 @@ export function AuthShell({
             <li key={point} className="flex items-start gap-3">
               <span
                 aria-hidden
-                className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-ink bg-green text-[11px] font-extrabold leading-none"
+                className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-line bg-green text-[11px] font-extrabold leading-none"
               >
                 &#10003;
               </span>

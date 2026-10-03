@@ -189,7 +189,7 @@ export function BrowseView() {
       />
 
       {/* Toolbar */}
-      <div className="mb-6 flex flex-col gap-4 rounded-2xl border-2 border-ink bg-white p-4 shadow-hard-sm">
+      <div className="mb-6 flex flex-col gap-4 rounded-2xl border-2 border-line bg-white p-4 shadow-hard-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-center">
           <div className="relative flex-1">
             <label htmlFor="browse-search" className="sr-only">
@@ -209,7 +209,7 @@ export function BrowseView() {
             />
           </div>
 
-          <div role="group" aria-label="Auction status" className="flex rounded-full border-2 border-ink bg-cream p-1">
+          <div role="group" aria-label="Auction status" className="flex rounded-full border-2 border-line bg-cream p-1">
             {STATUS_OPTIONS.map((s) => (
               <button
                 key={s.id}
@@ -253,7 +253,7 @@ export function BrowseView() {
             type="button"
             aria-pressed={category === ''}
             onClick={() => setParams({ category: '' })}
-            className={`shrink-0 rounded-full border-2 border-ink px-4 py-1.5 text-sm font-semibold transition-colors ${
+            className={`shrink-0 rounded-full border-2 border-line px-4 py-1.5 text-sm font-semibold transition-colors ${
               category === '' ? 'bg-ink text-cream' : 'bg-white hover:bg-cream-2'
             }`}
           >
@@ -269,7 +269,7 @@ export function BrowseView() {
                 type="button"
                 aria-pressed={active}
                 onClick={() => setParams({ category: active ? '' : c })}
-                className={`shrink-0 rounded-full border-2 border-ink px-4 py-1.5 text-sm font-semibold transition-colors ${
+                className={`shrink-0 rounded-full border-2 border-line px-4 py-1.5 text-sm font-semibold transition-colors ${
                   active ? `${theme.bg} ${theme.text}` : 'bg-white hover:bg-cream-2'
                 }`}
               >

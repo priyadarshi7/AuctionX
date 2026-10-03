@@ -62,20 +62,20 @@ export function NotificationBell() {
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="relative flex h-8 w-8 items-center justify-center rounded-full border-2 border-ink bg-white text-sm hover:bg-cream-2"
+        className="relative flex h-8 w-8 items-center justify-center rounded-full border-2 border-line bg-white text-sm hover:bg-cream-2"
         aria-label="Notifications"
       >
         {'\u{1F514}'}
         {unreadCount > 0 && (
-          <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full border border-ink bg-pink px-1 text-[10px] font-semibold text-ink">
+          <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full border border-line bg-pink px-1 text-[10px] font-semibold text-ink">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 z-10 mt-2 w-80 rounded-2xl border-2 border-ink bg-white shadow-hard">
-          <div className="flex items-center justify-between border-b-2 border-ink px-3 py-2">
+        <div className="absolute right-0 z-10 mt-2 w-80 rounded-2xl border-2 border-line bg-white shadow-hard">
+          <div className="flex items-center justify-between border-b-2 border-line px-3 py-2">
             <span className="font-display text-sm font-bold">Notifications</span>
             {unreadCount > 0 && (
               <button
@@ -104,7 +104,7 @@ export function NotificationBell() {
                         markRead.mutate(notification.id);
                       }
                     }}
-                    className="block border-b border-ink/10 px-3 py-2 text-sm hover:bg-cream-2"
+                    className="block border-b border-line/10 px-3 py-2 text-sm hover:bg-cream-2"
                   >
                     <p>{message}</p>
                     <p className="mt-1 text-xs text-ink/40">{new Date(notification.createdAt).toLocaleString()}</p>
