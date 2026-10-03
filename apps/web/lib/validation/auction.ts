@@ -32,7 +32,7 @@ export const setPriceAndPublishFormSchema = z
       .trim()
       .refine((value) => value === '' || Number(value) > 0, 'Must be greater than 0')
       .optional(),
-    durationHours: z.enum(['1', '6', '24', '72']),
+    durationSeconds: z.enum(['30', '3600', '21600', '86400', '259200']),
   })
   // Same rule the backend enforces (AUCTION-002/ADR-0007) restated here for
   // fast feedback — duplicated validation is an accepted tradeoff

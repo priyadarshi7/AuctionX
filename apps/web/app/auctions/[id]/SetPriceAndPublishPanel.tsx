@@ -26,7 +26,7 @@ export function SetPriceAndPublishPanel({ auctionId, accessToken }: { auctionId:
     formState: { errors },
   } = useForm<SetPriceAndPublishFormValues>({
     resolver: zodResolver(setPriceAndPublishFormSchema),
-    defaultValues: { durationHours: '24' },
+    defaultValues: { durationSeconds: '86400' },
   });
 
   const publish = useMutation({
@@ -39,7 +39,7 @@ export function SetPriceAndPublishPanel({ auctionId, accessToken }: { auctionId:
         startingPriceCents,
         ...(reservePriceCents !== undefined ? { reservePriceCents } : {}),
       });
-      const endTime = computeEndTime(values.durationHours);
+      const endTime = computeEndTime(values.durationSeconds);
       await publishAuctionRequest(accessToken, auctionId, endTime);
       await startAuctionRequest(accessToken, auctionId);
     },
@@ -91,7 +91,7 @@ export function SetPriceAndPublishPanel({ auctionId, accessToken }: { auctionId:
             />
           </Field>
         </div>
-        <SelectField id="durationHours" label="Duration" error={errors.durationHours?.message} {...register('durationHours')}>
+        <SelectField id="durationSeconds" label="Duration" error={errors.durationSeconds?.message} {...register('durationSeconds')}>
           {Object.entries(DURATION_LABELS).map(([value, label]) => (
             <option key={value} value={value}>
               {label}
