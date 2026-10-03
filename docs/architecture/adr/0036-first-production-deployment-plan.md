@@ -427,6 +427,19 @@ Two things this surfaced:
   and an outbid event (with the right payload) only when another bidder is
   outbid.
 
+Measured live after deploy (same auction, same client, 10 bids each):
+accepted-bid median **~1080ms -> ~770ms**.
+
+**Correction to the earlier "~250-300ms per DB round trip" figure:** that
+was `/readiness` timed end to end from outside Render, so it included the
+client<->Render network hop. Splitting it properly (medians of 9):
+`/liveness` (no DB/Redis) ~222ms, `/readiness` (one `SELECT 1`) ~285ms,
+cached `GET /auctions/:id` (two Redis calls) ~348ms. So one Render->Supabase
+round trip is **~60ms**, one Render->Upstash call is also **~60ms**, and the
+rest is the client's own distance to Singapore. The Singapore move was
+still the right call (Oregon->Tokyo hops are far longer), but the per-hop
+cost is ~60ms, not ~275ms.
+
 Full suite: 191/191 passing under `--runInBand` (the project's `npm test`
 mode). The notifications suite can't currently run locally — see the
 Revisit Conditions entry on Redpanda's advertised address.
@@ -464,8 +477,10 @@ Revisit Conditions entry on Redpanda's advertised address.
   platform with faster cold starts (Fly.io's Firecracker VMs were
   considered and are a live option, not evaluated further since this
   wasn't yet a blocking concern for a $0 learning deployment).
-- ~250-300ms per DB round trip (Singapore <-> Tokyo) is a real, accepted
-  floor given free-tier region constraints, not a solved problem. If bid
+- ~60ms per DB round trip (Singapore <-> Tokyo; see the correction in the
+  round-trips addendum — the originally recorded ~250-300ms included the
+  client's own network hop) is a real, accepted floor given free-tier
+  region constraints, not a solved problem. If bid
   latency ever needs to go lower than that allows, the actual lever is
   reducing CROSS-REGION round trips, not adding more code: either a
   same-region (Tokyo-area or closer) paid Postgres host, or caching the

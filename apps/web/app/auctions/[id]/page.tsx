@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { getAuctionRequest, listBidsRequest } from '@/lib/auctions';
+import { isOptimisticBid } from '@/lib/bids';
 import { CATEGORY_DISPLAY } from '@/lib/categoryDisplay';
 import { formatCents } from '@/lib/format';
 import { useAuctionSocket } from '@/lib/useAuctionSocket';
@@ -100,7 +101,9 @@ export default function AuctionDetailPage() {
     null,
   );
   const iHaveBid = !!user && bids.some((bid) => bid.bidderId === user.id);
-  const iAmLeading = !!user && leadingBid?.bidderId === user.id;
+  // A pending (not yet server-confirmed) bid never counts as "leading" — the
+  // claim only becomes true once the server accepts it (ADR-0037).
+  const iAmLeading = !!user && leadingBid?.bidderId === user.id && !isOptimisticBid(leadingBid);
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">
@@ -188,7 +191,7 @@ export default function AuctionDetailPage() {
               {isActive && (
                 <div className="mt-5 flex flex-col gap-4 border-t-2 border-line/10 pt-5">
                   {iAmLeading && <Notice tone="success">You&apos;re the highest bidder. Stay ready to defend it.</Notice>}
-                  {iHaveBid && !iAmLeading && (
+                  {iHaveBid && !iAmLeading && !(leadingBid && isOptimisticBid(leadingBid)) && (
                     <Notice tone="info">You&apos;ve been outbid. Place a higher bid to get back in front.</Notice>
                   )}
 
@@ -258,7 +261,8 @@ export default function AuctionDetailPage() {
             ) : (
               <ul className="overflow-hidden rounded-2xl border-2 border-line bg-white">
                 {bids.map((bid) => {
-                  const isLeader = bid.id === leadingBid?.id;
+                  const pending = isOptimisticBid(bid);
+                  const isLeader = bid.id === leadingBid?.id && !pending;
                   const mine = !!user && bid.bidderId === user.id;
                   return (
                     <li
@@ -277,6 +281,11 @@ export default function AuctionDetailPage() {
                         {mine && (
                           <span className="rounded-full border-2 border-line bg-cyan px-2 py-0 text-[11px] font-bold">
                             You
+                          </span>
+                        )}
+                        {pending && (
+                          <span className="animate-pulse rounded-full border-2 border-line bg-white px-2 py-0 text-[11px] font-bold">
+                            Placing…
                           </span>
                         )}
                       </span>

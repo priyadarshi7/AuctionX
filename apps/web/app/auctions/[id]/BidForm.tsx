@@ -8,8 +8,10 @@ import { z } from 'zod';
 import { ApiError } from '@/lib/apiClient';
 import { resendVerificationRequest } from '@/lib/auth';
 import { getBidErrorMessage } from '@/lib/bidErrors';
-import { placeBidRequest } from '@/lib/bids';
+import type { Auction, Bid } from '@/lib/types/auction';
+import { makeOptimisticBid, placeBidRequest } from '@/lib/bids';
 import { formatCents } from '@/lib/format';
+import { useAuthStore } from '@/store/authStore';
 import { Button } from '../../components/ui/Button';
 import { Field, inputClass } from '../../components/ui/Field';
 import { Notice } from '../../components/ui/Notice';
@@ -38,6 +40,7 @@ export function BidForm({
   accessToken: string;
 }) {
   const queryClient = useQueryClient();
+  const userId = useAuthStore((state) => state.user?.id);
   const [serverError, setServerError] = useState<string | null>(null);
   const [needsVerification, setNeedsVerification] = useState(false);
   const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent'>('idle');
@@ -65,19 +68,42 @@ export function BidForm({
     // (isSubmitting below), so this can't fire twice for the SAME click.
     const idempotencyKey = crypto.randomUUID();
 
+    // Optimistic update (ADR-0037): show the bid as placed right now instead
+    // of after the ~0.8s round trip to the server. The server stays the only
+    // authority — this is a guess that is replaced by the server's real data
+    // on success (invalidate below) or rolled back on failure. Pending
+    // fetches are cancelled first so a poll that was already in flight can't
+    // land after this and overwrite the guess with stale data.
+    const detailKey = ['auctions', 'detail', auctionId];
+    const bidsKey = ['auctions', 'bids', auctionId];
+    await Promise.all([queryClient.cancelQueries({ queryKey: detailKey }), queryClient.cancelQueries({ queryKey: bidsKey })]);
+    const previousDetails = queryClient.getQueriesData<{ auction: Auction }>({ queryKey: detailKey });
+    const previousBids = queryClient.getQueriesData<{ bids: Bid[] }>({ queryKey: bidsKey });
+    queryClient.setQueriesData<{ auction: Auction }>({ queryKey: detailKey }, (old) =>
+      old ? { ...old, auction: { ...old.auction, currentPriceCents: amountCents } } : old,
+    );
+    if (userId) {
+      const optimistic = makeOptimisticBid(auctionId, userId, amountCents, idempotencyKey);
+      queryClient.setQueriesData<{ bids: Bid[] }>({ queryKey: bidsKey }, (old) =>
+        old ? { ...old, bids: [optimistic, ...old.bids] } : old,
+      );
+    }
+    reset();
+
     try {
       const result = await placeBidRequest(accessToken, auctionId, amountCents, idempotencyKey);
       setExtended(result.auctionExtended);
       setPlaced(amountCents);
-      reset();
-      // Both queries need to reflect the new bid immediately — the price
-      // shown, and the history list it now appears in — rather than
-      // waiting for the next poll interval (app/auctions/[id]/page.tsx).
+      // Replace the guess with the server's real data (real bid id, real
+      // timestamp, any other bids that landed meanwhile).
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['auctions', 'detail', auctionId] }),
-        queryClient.invalidateQueries({ queryKey: ['auctions', 'bids', auctionId] }),
+        queryClient.invalidateQueries({ queryKey: detailKey }),
+        queryClient.invalidateQueries({ queryKey: bidsKey }),
       ]);
     } catch (err) {
+      for (const [key, data] of [...previousDetails, ...previousBids]) queryClient.setQueryData(key, data);
+      void queryClient.invalidateQueries({ queryKey: detailKey });
+      void queryClient.invalidateQueries({ queryKey: bidsKey });
       setServerError(err instanceof ApiError ? getBidErrorMessage(err) : 'Something went wrong. Please try again.');
       setNeedsVerification(err instanceof ApiError && err.code === 'EMAIL_NOT_VERIFIED');
     }
