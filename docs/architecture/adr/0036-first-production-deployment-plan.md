@@ -267,6 +267,20 @@ locally in the future.
   based end-to-end testing of the API container against local Kafka isn't
   possible without further config — only matters if that specific testing
   need comes up later.
+- Render's free Web Service tier spins the container down after ~15min of
+  no inbound HTTP traffic; the next request pays a cold-start penalty
+  (seconds to ~30-60s). Accepted deliberately (2026-10-03) rather than
+  worked around — this is a $0 learning deployment, not yet serving real
+  traffic. Two consequences worth naming: (1) WebSocket connections to any
+  open browser tab get dropped the moment the container sleeps — mitigated
+  by useAuctionSocket.ts/useNotificationSocket.ts already implementing
+  exponential-backoff reconnection (Section 14), so this resolves itself
+  within the backoff window once the service wakes, not a broken app, just
+  a few seconds of "disconnected"; (2) the Kafka consumers (outbox
+  publisher, notification consumer, AI valuation worker) are the same
+  Node process, so they also stop while asleep — events queue on Aiven's
+  broker (3-day retention) until any request wakes the service again, not
+  lost, just delayed.
 ```
 
 ## Consequences
@@ -279,14 +293,66 @@ locally in the future.
 - Nothing in `docker-compose.yml` changed — local dev continues exactly
   as before (native `npm run dev`, not containerized).
 
+## Addendum (2026-10-03): Gmail SMTP doesn't work on Render, Brevo does
+
+Found live, after real users couldn't get verification emails: Render's
+free tier blocks outbound SMTP ports (25/465/587) entirely. `GmailEmailSender`'s
+connection doesn't get refused, it just hangs — Render's firewall silently
+drops the packets — until nodemailer's own timeout. Since `registerUser`
+awaits the send inline (Section 24's fail-open try/catch still fires
+eventually, but not before the whole HTTP request hangs with it), real
+registration requests took 84-123+ seconds; one even hit Render's own
+proxy timeout first and returned a bare 502 before the backend had even
+responded, despite the backend continuing to process the request
+underneath. Confirmed via three separate live registration attempts, zero
+successful deliveries, cross-checked against independent reports of the
+same Render free-tier SMTP block.
+
+Two providers evaluated as the fix, in order:
+
+1. **Resend** (HTTP API, not SMTP — sidesteps the port block entirely).
+   Built, live-tested, confirmed working — but only to Resend's own
+   account-verified email. Its free sandbox sender cannot reach arbitrary
+   recipients without a verified sending domain (SPF/DKIM DNS records),
+   and this deployment has no domain to verify (none owned, buying one
+   wasn't an option). Kept in the codebase as a secondary option for
+   later, once a domain exists.
+2. **Brevo** (also HTTP API) — chosen instead because its verification
+   requirement is a single confirmed email address, not domain DNS
+   ownership. Live-tested with a real third-party recipient (a second,
+   genuinely different Gmail address, not a `+alias` of the sender) —
+   confirmed delivered. Real tradeoff, not hidden: without full domain
+   authentication, Brevo routes mail through its own shared sending
+   domain, so deliverability is weaker than a properly domain-
+   authenticated sender (more likely flagged by strict filters,
+   especially Gmail/Yahoo) — accepted since "reaches inbox or spam
+   folder" beats both Resend's hard block and Gmail SMTP's failure modes
+   by a wide margin.
+
+`infrastructure/email/sender.ts`'s `createEmailSender()` now prefers Brevo
+> Resend > Gmail SMTP > console fallback. Gmail SMTP stays only as the
+local-dev path (no SMTP port block there). `GmailEmailSender` also picked
+up explicit 10s connection/greeting/socket timeouts as defense-in-depth
+(Section 67) — unrelated to which provider is active, but a real gap this
+incident exposed: it previously had none at all.
+
 ## Revisit Conditions
 
 - If local Docker-based end-to-end testing against Redpanda is ever
   actually needed, revisit the advertised-listener config then (e.g. a
   second listener advertised for a Docker-internal hostname).
-- If Gmail's send cap becomes a real problem post-launch, swap
-  `GmailEmailSender` for a dedicated provider — `sender.ts`'s own doc
-  comment already names this as the intended extension point.
+- Gmail's send cap concern is moot now — Gmail SMTP is no longer the
+  production path at all (see the addendum above).
+- If a domain is ever acquired for this project, switch back to Resend
+  (verify the domain there, set `RESEND_FROM` to the new address) for
+  better deliverability than Brevo's shared-domain routing — no code
+  change needed, `createEmailSender()` already prefers Brevo only because
+  no domain exists yet, not for any other reason.
 - Once Admin panel + real Stripe land (the agreed next milestone), this
   ADR's provider list doesn't need to change — both are backend/frontend
   features deploying onto the exact same infra already planned here.
+- If/when this gets real traffic, revisit the Render free-tier sleep
+  behavior: either accept paying for an always-on instance, or move to a
+  platform with faster cold starts (Fly.io's Firecracker VMs were
+  considered and are a live option, not evaluated further since this
+  wasn't yet a blocking concern for a $0 learning deployment).

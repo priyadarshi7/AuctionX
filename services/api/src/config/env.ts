@@ -36,6 +36,28 @@ const envSchema = z.object({
   // warning at boot, not a silent gap.
   GMAIL_USER: z.string().email().optional(),
   GMAIL_APP_PASSWORD: z.string().min(1).optional(),
+  // Resend (HTTP API, not SMTP) — ADR-0036 addendum: Render's free tier
+  // blocks outbound SMTP ports (25/465/587) entirely, so GmailEmailSender's
+  // raw-SMTP connection just hangs until timeout on Render, no matter how
+  // correct the credentials are. Resend goes over normal HTTPS, which isn't
+  // blocked. Preferred over Gmail when set (sender.ts's createEmailSender);
+  // Gmail SMTP stays as a fallback for environments without this port
+  // restriction (e.g. local dev). RESEND_FROM defaults to Resend's own
+  // sandbox sender, which only delivers to the Resend account's own verified
+  // email until a real sending domain is verified — a real limitation,
+  // acceptable for now, worth revisiting before real users register.
+  RESEND_API_KEY: z.string().min(1).optional(),
+  RESEND_FROM: z.string().min(1).default('AuctionX <onboarding@resend.dev>'),
+  // Brevo (HTTP API) — ADR-0036 addendum: the one free option that delivers
+  // to arbitrary real users WITHOUT owning a domain. Only requires
+  // verifying a single email address (Brevo dashboard -> Senders -> Add a
+  // sender -> confirm via the link Brevo emails to it) — no DNS access
+  // needed, unlike Resend's domain requirement for anything beyond its own
+  // sandbox. sender.ts's createEmailSender() prefers this over Resend for
+  // exactly that reason. BREVO_FROM_EMAIL must be the address you verified.
+  BREVO_API_KEY: z.string().min(1).optional(),
+  BREVO_FROM_EMAIL: z.string().email().optional(),
+  BREVO_FROM_NAME: z.string().min(1).default('AuctionX'),
   // Used to build the reset-password link sent in the email. No frontend
   // exists yet (Section 73 — apps/web not started), so this defaults to
   // where it will run locally; the link is a placeholder contract until
@@ -149,6 +171,13 @@ const envSchema = z.object({
         'KAFKA_SASL_USERNAME is set but KAFKA_SASL_PASSWORD and/or KAFKA_SSL_CA is missing — ' +
         'all three are required together for SASL_SSL, or none of them for a local unauthenticated broker.',
       path: ['KAFKA_SASL_USERNAME'],
+    });
+  }
+  if (value.BREVO_API_KEY && !value.BREVO_FROM_EMAIL) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'BREVO_API_KEY is set but BREVO_FROM_EMAIL is missing — both are required together.',
+      path: ['BREVO_API_KEY'],
     });
   }
 });
