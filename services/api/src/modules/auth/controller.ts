@@ -13,7 +13,6 @@ import {
   requestPasswordReset,
   resendVerificationEmail,
   resetPassword,
-  setUserStatus,
   verifyEmail,
 } from './service';
 import type {
@@ -21,7 +20,6 @@ import type {
   LoginInput,
   RegisterInput,
   ResetPasswordInput,
-  UpdateUserStatusInput,
   VerifyEmailInput,
 } from './schema';
 
@@ -157,20 +155,6 @@ export async function deleteAccountHandler(
     // left for it to be useful for.
     clearRefreshCookie(res);
     res.status(204).send();
-  } catch (err) {
-    next(err);
-  }
-}
-
-export async function updateUserStatus(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): Promise<void> {
-  try {
-    const { status } = req.body as UpdateUserStatusInput;
-    const user = await setUserStatus(req.params.userId as string, status);
-    res.status(200).json({ user });
   } catch (err) {
     next(err);
   }

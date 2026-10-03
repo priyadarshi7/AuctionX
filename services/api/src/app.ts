@@ -10,6 +10,7 @@ import { apiRateLimit } from './middleware/rateLimit';
 import { env } from './config/env';
 import { logger } from './infrastructure/observability/logger';
 import { prisma } from './infrastructure/database/prisma';
+import { adminRoutes } from './modules/admin/routes';
 import { authRoutes } from './modules/auth/routes';
 import { auctionRoutes } from './modules/auctions/routes';
 import { bidRoutes } from './modules/bids/routes';
@@ -79,6 +80,7 @@ export function createApp(): Express {
   // limiting them risks manufacturing a false "unhealthy" signal under load.
   app.use('/api/v1', optionalAuthenticate, apiRateLimit);
   app.use('/api/v1/auth', authRoutes);
+  app.use('/api/v1/admin', adminRoutes);
   app.use('/api/v1/auctions', auctionRoutes);
   app.use('/api/v1/auctions/:auctionId/bids', bidRoutes);
   app.use('/api/v1/uploads', uploadRoutes);

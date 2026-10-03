@@ -1,4 +1,4 @@
-import type { RefreshToken, User, UserStatus } from '@prisma/client';
+import type { RefreshToken, User } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma';
 
 export type NewUser = {
@@ -19,12 +19,6 @@ export function findUserByEmail(email: string): Promise<User | null> {
 
 export function findUserById(id: string): Promise<User | null> {
   return prisma.user.findUnique({ where: { id } });
-}
-
-// Throws Prisma's P2025 ("record not found") if userId doesn't exist — the
-// service layer translates that, same pattern as createUser's P2002.
-export function updateUserStatus(userId: string, status: UserStatus): Promise<User> {
-  return prisma.user.update({ where: { id: userId }, data: { status } });
 }
 
 export type UserHistoryCounts = { bidsPlaced: number; bidsReceived: number; orders: number };

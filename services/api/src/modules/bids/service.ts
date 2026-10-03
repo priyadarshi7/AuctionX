@@ -110,6 +110,14 @@ export async function placeBid(
   if (!bidder || !bidder.emailVerifiedAt) {
     throw new ForbiddenError('Verify your email before placing a bid', 'EMAIL_NOT_VERIFIED');
   }
+  // A suspended/banned user's access token stays valid until it expires
+  // (authenticate is stateless and never reads the DB), so account status is
+  // re-checked here against the row already loaded above — free, and it
+  // closes the up-to-15-minute window in which a banned user could keep
+  // bidding on a token issued before the ban (ADR-0039).
+  if (bidder.status !== 'ACTIVE') {
+    throw new ForbiddenError('Your account is not active', 'ACCOUNT_DISABLED');
+  }
 
   // Fast-reject precheck — an optimization, not a correctness gate. The
   // 5s auction cache (ADR-0017) is invalidated synchronously after every

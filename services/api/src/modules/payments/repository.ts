@@ -1,6 +1,7 @@
 import type { Payment, PaymentStatus } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma';
 import { createOutboxEventInTx } from '../../infrastructure/outbox/repository';
+import { logger } from '../../infrastructure/observability/logger';
 
 // PENDING or SUCCEEDED both count as "active" — if either exists, don't
 // start a second payment attempt for this order (PENDING: one's already in
@@ -64,9 +65,26 @@ export async function applyPaymentWebhookEvent(
     await tx.payment.update({ where: { id: payment.id }, data: { status: outcome } });
 
     if (outcome === 'SUCCEEDED') {
-      // .update() already returns the full updated row — no extra read
-      // needed to get sellerId/amountCents for the event payload below.
-      const updatedOrder = await tx.order.update({ where: { id: payment.orderId }, data: { status: 'PAID' } });
+      // Guarded: only a PENDING_PAYMENT order may become PAID. The payment
+      // deadline worker can cancel an order while a payment attempt is
+      // still in flight (ADR-0038); an unguarded update here would silently
+      // resurrect that CANCELLED order. The Payment itself stays SUCCEEDED
+      // regardless — the provider really did take the money, and hiding
+      // that would be worse than the awkward state. What's left is a
+      // paid-but-cancelled order that needs a manual refund, logged loudly
+      // here and surfaced in the admin orders overview.
+      const { count } = await tx.order.updateMany({
+        where: { id: payment.orderId, status: 'PENDING_PAYMENT' },
+        data: { status: 'PAID' },
+      });
+      if (count === 0) {
+        logger.error(
+          { orderId: payment.orderId, paymentId: payment.id },
+          'payment.succeeded_for_non_payable_order: money taken for an order that is no longer awaiting payment; needs a manual refund',
+        );
+        return { applied: true };
+      }
+      const updatedOrder = await tx.order.findUniqueOrThrow({ where: { id: payment.orderId } });
       // Published via the Outbox (ADR-0027) — a consumer
       // (modules/notifications/consumer.ts) turns this into a
       // PAYMENT_RECEIVED notification for the seller, asynchronously.

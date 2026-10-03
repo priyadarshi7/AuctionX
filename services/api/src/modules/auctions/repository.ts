@@ -2,6 +2,7 @@ import type { Auction, AuctionCategory, AuctionCondition, AuctionStatus, Prisma 
 import { prisma } from '../../infrastructure/database/prisma';
 import { createOutboxEventInTx } from '../../infrastructure/outbox/repository';
 import { AI_VALUATION_EVENTS_TOPIC, SEARCH_EVENTS_TOPIC } from '../../infrastructure/kafka/topics';
+import { computePaymentDueAt } from '../orders/lifecycle';
 
 // Phase 9 (Section 25/ADR-0029): every function in this file that changes
 // a field the search index cares about publishes this SAME lightweight
@@ -288,6 +289,7 @@ export async function closeAuctionIfExpired(auctionId: string, now: Date): Promi
           sellerId: auction.sellerId,
           buyerId: highestBid.bidderId,
           amountCents: highestBid.amountCents,
+          paymentDueAt: computePaymentDueAt(now),
         },
       });
       orderId = order.id;

@@ -1,6 +1,15 @@
 // Mirrors services/api/prisma/schema.prisma's Notification model.
 
-export type NotificationType = 'OUTBID' | 'AUCTION_WON' | 'AUCTION_SOLD' | 'AUCTION_RESERVE_NOT_MET' | 'PAYMENT_RECEIVED';
+export type NotificationType =
+  | 'OUTBID'
+  | 'AUCTION_WON'
+  | 'AUCTION_SOLD'
+  | 'AUCTION_RESERVE_NOT_MET'
+  | 'PAYMENT_RECEIVED'
+  | 'ORDER_SHIPPED'
+  | 'ORDER_DELIVERED'
+  | 'ORDER_CANCELLED'
+  | 'AUCTION_MODERATED';
 
 export type Notification = {
   id: string;

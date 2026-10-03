@@ -53,6 +53,7 @@ export function NavBar() {
               <NavLink href="/auctions/new">Sell</NavLink>
               <NavLink href="/my-auctions">My auctions</NavLink>
               <NavLink href="/orders">Orders</NavLink>
+              {user?.role === 'ADMIN' && <NavLink href="/admin">Admin</NavLink>}
             </>
           )}
         </nav>

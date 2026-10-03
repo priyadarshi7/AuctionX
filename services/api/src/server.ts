@@ -6,6 +6,10 @@ import { prisma } from './infrastructure/database/prisma';
 import { redis } from './infrastructure/redis/client';
 import { startAuctionClosingWorker, stopAuctionClosingWorker } from './infrastructure/jobs/auctionClosingWorker';
 import {
+  startOrderPaymentDeadlineWorker,
+  stopOrderPaymentDeadlineWorker,
+} from './infrastructure/jobs/orderPaymentDeadlineWorker';
+import {
   startOutboxPublisherWorker,
   stopOutboxPublisherWorker,
 } from './infrastructure/jobs/outboxPublisherWorker';
@@ -25,6 +29,7 @@ const server = app.listen(env.PORT, () => {
 });
 
 startAuctionClosingWorker();
+startOrderPaymentDeadlineWorker();
 // Attached to the SAME http.Server app.listen() returned, not a second
 // port — see gateway.ts's module comment for why this is one process today.
 startWebSocketGateway(server);
@@ -88,6 +93,7 @@ startAiValuationConsumer();
 function shutdown(signal: string): void {
   logger.info({ signal }, 'Shutting down gracefully');
   stopAuctionClosingWorker();
+  stopOrderPaymentDeadlineWorker();
   stopOutboxPublisherWorker();
   stopWebSocketGateway();
   void stopNotificationsConsumer().catch((err: unknown) => {

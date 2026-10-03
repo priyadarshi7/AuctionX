@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate';
-import { requireRole } from '../../middleware/authorize';
 import { createRequireTrustedOrigin } from '../../middleware/csrf';
 import { env } from '../../config/env';
 import {
@@ -20,7 +19,6 @@ import {
   register,
   resendVerificationHandler,
   resetPasswordHandler,
-  updateUserStatus,
   verifyEmailHandler,
 } from './controller';
 import {
@@ -28,7 +26,6 @@ import {
   loginSchema,
   registerSchema,
   resetPasswordSchema,
-  updateUserStatusSchema,
   verifyEmailSchema,
 } from './schema';
 
@@ -51,18 +48,9 @@ authRoutes.post('/login', authRateLimit, validateBody(loginSchema), login);
 authRoutes.post('/refresh', authRateLimit, requireTrustedOrigin, refresh);
 authRoutes.post('/logout', requireTrustedOrigin, logout);
 authRoutes.get('/me', authenticate, me);
-// No dedicated rate limiter — self-only, destructive-but-rare, same
-// reasoning as PATCH /users/:userId/status below (the global apiRateLimit
-// already applied to /api/v1/* in app.ts is enough).
+// No dedicated rate limiter — self-only, destructive-but-rare (the global
+// apiRateLimit already applied to /api/v1/* in app.ts is enough).
 authRoutes.delete('/me', authenticate, deleteAccountHandler);
-
-authRoutes.patch(
-  '/users/:userId/status',
-  authenticate,
-  requireRole('ADMIN'),
-  validateBody(updateUserStatusSchema),
-  updateUserStatus,
-);
 
 // Both rate limiters run before validation, same as the other auth routes —
 // protects against payload-varying spam too, not just well-formed requests.

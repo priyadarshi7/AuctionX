@@ -16,6 +16,7 @@
     "db:backup": "tsx scripts/db-backup.ts",
     "db:restore": "tsx scripts/db-restore.ts",
     "reindex:search": "tsx scripts/reindex-search.ts",
+    "make-admin": "tsx scripts/make-admin.ts",
     "ai:pull-model": "docker exec auctionx-ollama ollama pull moondream"
   },
   "dependencies": {

@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { UserStatus } from '@prisma/client';
 
 // Deliberately no forced composition rules (uppercase+digit+symbol, etc.) —
 // NIST SP 800-63B recommends against them; they push users toward
@@ -23,12 +22,6 @@ export const loginSchema = z.object({
 });
 
 export type LoginInput = z.infer<typeof loginSchema>;
-
-export const updateUserStatusSchema = z.object({
-  status: z.nativeEnum(UserStatus),
-});
-
-export type UpdateUserStatusInput = z.infer<typeof updateUserStatusSchema>;
 
 export const forgotPasswordSchema = z.object({
   email: z.string().trim().toLowerCase().email(),

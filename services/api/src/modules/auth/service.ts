@@ -33,7 +33,6 @@ import {
   invalidateUserResetTokens,
   invalidateUserVerificationTokens,
   revokeRefreshToken,
-  updateUserStatus,
 } from './repository';
 import type { LoginInput, RegisterInput } from './schema';
 
@@ -216,18 +215,6 @@ export async function deleteOwnAccount(userId: string): Promise<void> {
     );
   }
   await deleteUserAndOwnedAuctions(userId);
-}
-
-export async function setUserStatus(userId: string, status: UserStatus): Promise<PublicUser> {
-  try {
-    const user = await updateUserStatus(userId, status);
-    return toPublicUser(user);
-  } catch (err) {
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
-      throw new NotFoundError('User not found');
-    }
-    throw err;
-  }
 }
 
 export async function refreshTokens(

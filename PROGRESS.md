@@ -102,10 +102,47 @@ developer chose to defer the actual shrink (`wsl --shutdown` + admin
 `diskpart compact vdisk`, briefly stops all containers) rather than do it
 mid-session; still open whenever convenient.
 
+## Latest status (2026-10-04) — read this first
+
+The app IS deployed (Vercel frontend, Render Singapore backend, Supabase
+Postgres, Upstash Redis, Aiven Kafka, Supabase Storage, Brevo email); the
+DEPLOY-001 notes below are the history of getting there. Since then:
+
+- **Latency (ADR-0036 addenda, ADR-0037):** backend moved to Singapore (next
+  to Supabase Tokyo); the bid transaction cut from up to 7 sequential
+  statements to 2 (locked read + one CTE write), Redis fast-reject for doomed
+  bids, optimistic bid UI. An accepted bid measures ~0.8s end to end from
+  outside; the screen updates instantly. One DB/Redis round trip is ~60ms.
+- **POST-001/002/003 (ADR-0038):** order lifecycle PENDING_PAYMENT -> PAID ->
+  SHIPPED -> DELIVERED (seller ships with carrier + tracking, buyer confirms),
+  48h unpaid-order deadline worker -> CANCELLED, late-payment-never-
+  resurrects-a-cancelled-order guard, notifications + shipped email, frontend
+  timeline/ship form/confirm button.
+- **ADMIN-001 (ADR-0039):** `npm run make-admin -- <email>` is the only way to
+  create an admin; audited, guarded user moderation; append-only
+  `AdminAuditLog`; banned users can no longer bid/list on a still-valid token.
+- **ADMIN-002/003/004 (ADR-0040):** guarded auction moderation (pause/resume/
+  cancel + reason + seller notification), admin orders list with a "needs
+  refund" flag, live stats, and the `/admin` UI (dashboard, users, auctions,
+  orders, audit log).
+- 30-second auction duration option for testing (`lib/duration.ts`).
+- Tests: 233 backend tests pass under `jest --runInBand`.
+  `tests/notifications/notifications.test.ts` cannot run locally: Redpanda
+  advertises `localhost`, Node resolves it to `::1`, Docker resets it (ADR-0036
+  Revisit Conditions has the one-line fix).
+
+**Known open items:** frontend has no automated tests and the admin/order UI
+has not been exercised in a browser; refunds are manual; bidders are not told
+when an admin cancels an auction; the old Oregon Render service still exists;
+real Stripe (replacing the mock provider) is not started; Windows gotcha:
+Prisma `generate` fails with EPERM while `npm run dev` is running (types still
+update; stop the server only if the engine file itself must change).
+
 ## Current Task
 
 **TASK DEPLOY-001 — First production deployment plan + Dockerfile (ADR-0036)**
 → **prep complete, not yet actually deployed (no accounts created yet)**.
+_(Historical: superseded by "Latest status" above.)_
 Raised directly: "lets deploy it... plan it," plus a request for a gap
 list toward a "full fledged" platform (Admin panel, auction moderation,
 real Stripe). Agreed with the developer: deploy the CURRENT feature set

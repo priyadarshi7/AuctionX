@@ -38,6 +38,10 @@ export async function createNewAuction(sellerId: string, input: CreateAuctionInp
       'EMAIL_NOT_VERIFIED',
     );
   }
+  // Same stale-token reasoning as bids/service.ts's placeBid (ADR-0039).
+  if (seller.status !== 'ACTIVE') {
+    throw new ForbiddenError('Your account is not active', 'ACCOUNT_DISABLED');
+  }
 
   // status and currentPriceCents are never taken from the client (Section
   // 82) — every auction is born DRAFT regardless of what the request body

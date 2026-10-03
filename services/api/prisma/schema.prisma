@@ -273,7 +273,17 @@ model AuctionValuation {
 enum OrderStatus {
   PENDING_PAYMENT
   PAID
+  SHIPPED
+  DELIVERED
   CANCELLED
+}
+
+// Why an order ended up CANCELLED (ADR-0038). PAYMENT_TIMEOUT is the
+// unpaid-order worker; ADMIN is a manual moderation action. A buyer or
+// seller cancelling their own order is deliberately not a thing yet.
+enum OrderCancelReason {
+  PAYMENT_TIMEOUT
+  ADMIN
 }
 
 // Created exactly once, atomically, inside the same transaction that closes
@@ -309,6 +319,22 @@ model Order {
 
   status OrderStatus @default(PENDING_PAYMENT)
 
+  // Post-auction lifecycle (ADR-0038). All nullable: each is only
+  // meaningful once the order reaches the matching state, and `status` is
+  // the single source of truth for "which state" (these are the details of
+  // the transition, not a second state machine).
+  //
+  // paymentDueAt: set when the order is created; an unpaid order past this
+  // is cancelled by the payment-deadline worker. Nullable only because
+  // orders that predate this column are backfilled by the migration.
+  paymentDueAt   DateTime?
+  shippedAt      DateTime?
+  carrier        String?
+  trackingNumber String?
+  deliveredAt    DateTime?
+  cancelledAt    DateTime?
+  cancelReason   OrderCancelReason?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -316,6 +342,9 @@ model Order {
 
   @@index([sellerId])
   @@index([buyerId])
+  // The payment-deadline worker's scan: "unpaid orders past their due
+  // date". Same shape/reasoning as Auction's [status, endTime] index.
+  @@index([status, paymentDueAt])
   @@map("orders")
 }
 
@@ -421,6 +450,10 @@ enum NotificationType {
   AUCTION_SOLD
   AUCTION_RESERVE_NOT_MET
   PAYMENT_RECEIVED
+  ORDER_SHIPPED
+  ORDER_DELIVERED
+  ORDER_CANCELLED
+  AUCTION_MODERATED
 }
 
 // Created synchronously, inside the SAME transaction as the event it
@@ -543,4 +576,34 @@ model OutboxEvent {
   // outage doesn't reorder delivery once it recovers.
   @@index([publishedAt, claimedAt, createdAt])
   @@map("outbox_events")
+}
+
+// Append-only record of every admin/moderation action (ADR-0039). Never
+// updated, never deleted.
+//
+// No foreign keys, on purpose: an audit trail must outlive whatever it
+// describes. With a real FK to User, deleting (or cascading) a user would
+// either block on, or erase, the history of what was done to them. Plain
+// string ids keep the record intact; the cost is that an id can dangle,
+// which for an audit log is correct, not a defect.
+//
+// `action` is a free string for the same reason OutboxEvent.topic is: new
+// admin actions will keep appearing and each shouldn't need a migration.
+// `actorId` is null for actions taken outside the API (the make-admin CLI),
+// recorded in `metadata.via`.
+model AdminAuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  action     String
+  targetType String
+  targetId   String
+  reason     String?
+  metadata   Json
+  createdAt  DateTime @default(now())
+
+  // "Everything done to this user / auction / order, newest first".
+  @@index([targetType, targetId, createdAt])
+  // The audit log page itself: newest first across everything.
+  @@index([createdAt])
+  @@map("admin_audit_logs")
 }

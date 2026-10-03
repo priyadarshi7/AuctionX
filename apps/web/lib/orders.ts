@@ -5,6 +5,18 @@ export function listMyOrdersRequest(accessToken: string): Promise<{ orders: Orde
   return apiFetch<{ orders: Order[] }>('/orders', { accessToken });
 }
 
+export function shipOrderRequest(
+  accessToken: string,
+  orderId: string,
+  shipment: { carrier: string; trackingNumber: string },
+): Promise<{ order: Order }> {
+  return apiFetch<{ order: Order }>(`/orders/${orderId}/ship`, { method: 'POST', body: shipment, accessToken });
+}
+
+export function confirmDeliveryRequest(accessToken: string, orderId: string): Promise<{ order: Order }> {
+  return apiFetch<{ order: Order }>(`/orders/${orderId}/confirm-delivery`, { method: 'POST', accessToken });
+}
+
 export function getOrderRequest(accessToken: string, orderId: string): Promise<{ order: Order }> {
   return apiFetch<{ order: Order }>(`/orders/${orderId}`, { accessToken });
 }

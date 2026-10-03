@@ -24,6 +24,13 @@ function formatCents(cents: number): string {
 const GROUP_ID = env.NODE_ENV === 'test' ? 'notifications-consumer-test' : 'notifications-consumer';
 const TOPICS = ['bid-events', 'auction-events', 'payment-events'];
 
+// Carrier, tracking number and auction title are user-typed free text that
+// ends up inside an HTML email body — escaped so a seller can't inject
+// markup/links into a message that looks like it comes from AuctionX.
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 type NewNotificationFromEvent = {
   userId: string;
   type: NotificationType;
@@ -105,13 +112,60 @@ type PaymentSucceededPayload = {
   amountCents: number;
 };
 
-type DomainEvent = BidOutbidPayload | AuctionSoldPayload | AuctionReserveNotMetPayload | PaymentSucceededPayload;
+type OrderShippedPayload = {
+  type: 'order.shipped';
+  orderId: string;
+  auctionId: string;
+  buyerId: string;
+  sellerId: string;
+  carrier: string;
+  trackingNumber: string;
+};
+type OrderDeliveredPayload = {
+  type: 'order.delivered';
+  orderId: string;
+  auctionId: string;
+  buyerId: string;
+  sellerId: string;
+};
+
+type OrderCancelledPayload = {
+  type: 'order.cancelled';
+  orderId: string;
+  auctionId: string;
+  buyerId: string;
+  sellerId: string;
+  amountCents: number;
+  reason: string;
+};
+
+type AuctionModeratedPayload = {
+  type: 'auction.moderated';
+  auctionId: string;
+  sellerId: string;
+  action: 'pause' | 'resume' | 'cancel';
+  reason: string | null;
+};
+
+type DomainEvent =
+  | BidOutbidPayload
+  | AuctionSoldPayload
+  | AuctionReserveNotMetPayload
+  | PaymentSucceededPayload
+  | OrderShippedPayload
+  | OrderDeliveredPayload
+  | OrderCancelledPayload
+  | AuctionModeratedPayload;
 
 const KNOWN_EVENT_TYPES = new Set<DomainEvent['type']>([
   'bid.outbid',
   'auction.sold',
   'auction.reserve_not_met',
   'payment.succeeded',
+  'order.shipped',
+  'order.delivered',
+  'order.cancelled',
+  'auction.moderated',
 ]);
 
 function isDomainEvent(payload: unknown): payload is DomainEvent {
@@ -222,6 +276,75 @@ export async function handleNotificationEvent(topic: string, _key: string | null
       }
       return;
     }
+
+    case 'order.shipped': {
+      const buyerNotified = await createNotificationIdempotently(messageId, {
+        userId: payload.buyerId,
+        type: 'ORDER_SHIPPED',
+        orderId: payload.orderId,
+        auctionId: payload.auctionId,
+        data: { carrier: payload.carrier, trackingNumber: payload.trackingNumber },
+      });
+      if (buyerNotified) {
+        const [buyer, auction] = await Promise.all([
+          prisma.user.findUnique({ where: { id: payload.buyerId }, select: { email: true } }),
+          prisma.auction.findUnique({ where: { id: payload.auctionId }, select: { title: true } }),
+        ]);
+        if (buyer) {
+          const itemLabel = auction ? `"${escapeHtml(auction.title)}"` : 'your item';
+          await sendTransactionalEmail(
+            buyer.email,
+            'Your AuctionX order has shipped',
+            `<p>${itemLabel} is on its way via ${escapeHtml(payload.carrier)} (tracking: ${escapeHtml(payload.trackingNumber)}).</p><p>When it arrives, confirm delivery on <a href="${env.FRONTEND_URL}/orders/${payload.orderId}">your order</a>.</p>`,
+          );
+        }
+      }
+      return;
+    }
+
+    case 'order.cancelled': {
+      // Both parties are told: the buyer lost the item for not paying, the
+      // seller's item is unsold again. Same event, two rows; the compound
+      // (sourceEventId, userId) key keeps a redelivery idempotent per user.
+      const data = { amountCents: payload.amountCents, reason: payload.reason };
+      await createNotificationIdempotently(messageId, {
+        userId: payload.buyerId,
+        type: 'ORDER_CANCELLED',
+        orderId: payload.orderId,
+        auctionId: payload.auctionId,
+        data,
+      });
+      await createNotificationIdempotently(messageId, {
+        userId: payload.sellerId,
+        type: 'ORDER_CANCELLED',
+        orderId: payload.orderId,
+        auctionId: payload.auctionId,
+        data,
+      });
+      return;
+    }
+
+    case 'auction.moderated':
+      // An admin took action on the seller's auction; they are told what and
+      // why. (Bidders on a cancelled auction are not notified yet; see
+      // ADR-0040's revisit conditions.)
+      await createNotificationIdempotently(messageId, {
+        userId: payload.sellerId,
+        type: 'AUCTION_MODERATED',
+        auctionId: payload.auctionId,
+        data: { action: payload.action, reason: payload.reason },
+      });
+      return;
+
+    case 'order.delivered':
+      await createNotificationIdempotently(messageId, {
+        userId: payload.sellerId,
+        type: 'ORDER_DELIVERED',
+        orderId: payload.orderId,
+        auctionId: payload.auctionId,
+        data: {},
+      });
+      return;
   }
 }
 

@@ -35,6 +35,8 @@ export default function OrdersPage() {
   const roleOf = (buyerId: string) => (buyerId === user.id ? 'BUYING' : 'SELLING');
   const orders = all.filter((o) => filter === 'ALL' || roleOf(o.buyerId) === filter);
   const toPay = all.filter((o) => o.buyerId === user.id && o.status === 'PENDING_PAYMENT').length;
+  const toShip = all.filter((o) => o.sellerId === user.id && o.status === 'PAID').length;
+  const toConfirm = all.filter((o) => o.buyerId === user.id && o.status === 'SHIPPED').length;
 
   const tabs: { id: Filter; label: string }[] = [
     { id: 'ALL', label: 'All' },
@@ -49,7 +51,11 @@ export default function OrdersPage() {
         subtitle={
           toPay > 0
             ? `${toPay} ${toPay === 1 ? 'order is' : 'orders are'} waiting for your payment.`
-            : 'Wins and sales show up here.'
+            : toShip > 0
+              ? `${toShip} ${toShip === 1 ? 'order is' : 'orders are'} paid and waiting for you to ship.`
+              : toConfirm > 0
+                ? `${toConfirm} ${toConfirm === 1 ? 'order has' : 'orders have'} shipped. Confirm delivery when they arrive.`
+                : 'Wins and sales show up here.'
         }
       />
 
@@ -97,6 +103,8 @@ export default function OrdersPage() {
         {orders.map((order) => {
           const buying = order.buyerId === user.id;
           const needsPayment = buying && order.status === 'PENDING_PAYMENT';
+          const needsShipping = !buying && order.status === 'PAID';
+          const needsConfirm = buying && order.status === 'SHIPPED';
           return (
             <li key={order.id}>
               <Link
@@ -125,6 +133,12 @@ export default function OrdersPage() {
                   <p className="font-display text-xl font-extrabold">{formatCents(order.amountCents)}</p>
                   {needsPayment && (
                     <span className="rounded-full border-2 border-line bg-yellow px-3 py-1 text-sm font-bold">Pay now</span>
+                  )}
+                  {needsShipping && (
+                    <span className="rounded-full border-2 border-line bg-yellow px-3 py-1 text-sm font-bold">Ship now</span>
+                  )}
+                  {needsConfirm && (
+                    <span className="rounded-full border-2 border-line bg-cyan px-3 py-1 text-sm font-bold">Confirm delivery</span>
                   )}
                 </div>
               </Link>

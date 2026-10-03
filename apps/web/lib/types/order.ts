@@ -2,7 +2,8 @@
 // (ADR-0023/0025) — same Date-becomes-ISO-string-over-HTTP note as
 // lib/types/auction.ts.
 
-export type OrderStatus = 'PENDING_PAYMENT' | 'PAID' | 'CANCELLED';
+export type OrderStatus = 'PENDING_PAYMENT' | 'PAID' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
+export type OrderCancelReason = 'PAYMENT_TIMEOUT' | 'ADMIN';
 
 export type Order = {
   id: string;
@@ -12,6 +13,13 @@ export type Order = {
   buyerId: string;
   amountCents: number;
   status: OrderStatus;
+  paymentDueAt: string | null;
+  shippedAt: string | null;
+  carrier: string | null;
+  trackingNumber: string | null;
+  deliveredAt: string | null;
+  cancelledAt: string | null;
+  cancelReason: OrderCancelReason | null;
   createdAt: string;
   updatedAt: string;
 };

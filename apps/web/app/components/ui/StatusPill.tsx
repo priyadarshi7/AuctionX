@@ -14,6 +14,8 @@ const AUCTION: Record<AuctionStatus, { label: string; cls: string }> = {
 const ORDER: Record<OrderStatus, { label: string; cls: string }> = {
   PENDING_PAYMENT: { label: 'Awaiting payment', cls: 'bg-yellow' },
   PAID: { label: 'Paid', cls: 'bg-green' },
+  SHIPPED: { label: 'Shipped', cls: 'bg-cyan' },
+  DELIVERED: { label: 'Delivered', cls: 'bg-green' },
   CANCELLED: { label: 'Cancelled', cls: 'bg-white' },
 };
 

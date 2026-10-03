@@ -26,21 +26,21 @@ export function markAllNotificationsReadRequest(accessToken: string): Promise<vo
 // services/api create (bids/repository.ts, auctions/repository.ts,
 // payments/repository.ts).
 export function describeNotification(notification: Notification): { message: string; href: string } {
-  const data = notification.data as Record<string, number | null | undefined>;
+  const data = notification.data as Record<string, number | string | null | undefined>;
   switch (notification.type) {
     case 'OUTBID':
       return {
-        message: `You were outbid — the new highest bid is ${formatCents(data.newAmountCents ?? 0)}.`,
+        message: `You were outbid — the new highest bid is ${formatCents(Number(data.newAmountCents ?? 0))}.`,
         href: `/auctions/${notification.auctionId}`,
       };
     case 'AUCTION_WON':
       return {
-        message: `You won an auction for ${formatCents(data.amountCents ?? 0)}!`,
+        message: `You won an auction for ${formatCents(Number(data.amountCents ?? 0))}!`,
         href: `/orders/${notification.orderId}`,
       };
     case 'AUCTION_SOLD':
       return {
-        message: `Your auction sold for ${formatCents(data.amountCents ?? 0)}.`,
+        message: `Your auction sold for ${formatCents(Number(data.amountCents ?? 0))}.`,
         href: `/orders/${notification.orderId}`,
       };
     case 'AUCTION_RESERVE_NOT_MET':
@@ -50,7 +50,29 @@ export function describeNotification(notification: Notification): { message: str
       };
     case 'PAYMENT_RECEIVED':
       return {
-        message: `Payment received: ${formatCents(data.amountCents ?? 0)}.`,
+        message: `Payment received: ${formatCents(Number(data.amountCents ?? 0))}. Time to ship it.`,
+        href: `/orders/${notification.orderId}`,
+      };
+    case 'ORDER_SHIPPED':
+      return {
+        message: 'Your order has shipped. Confirm delivery when it arrives.',
+        href: `/orders/${notification.orderId}`,
+      };
+    case 'ORDER_DELIVERED':
+      return {
+        message: 'The buyer confirmed delivery. This sale is complete.',
+        href: `/orders/${notification.orderId}`,
+      };
+    case 'AUCTION_MODERATED': {
+      const verb = data.action === 'cancel' ? 'cancelled' : data.action === 'pause' ? 'paused' : 'resumed';
+      return {
+        message: `A moderator ${verb} your auction${data.reason ? `: ${String(data.reason)}` : '.'}`,
+        href: `/auctions/${notification.auctionId}`,
+      };
+    }
+    case 'ORDER_CANCELLED':
+      return {
+        message: 'An order was cancelled because payment was not received in time.',
         href: `/orders/${notification.orderId}`,
       };
   }
