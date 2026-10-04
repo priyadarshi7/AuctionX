@@ -21,7 +21,7 @@ export class ApiError extends Error {
 }
 
 type ApiFetchOptions = {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   accessToken?: string | null;
   query?: Record<string, string | number | undefined>;

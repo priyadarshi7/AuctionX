@@ -1,7 +1,16 @@
 import type { NextFunction, Request, Response } from 'express';
 import { UnauthorizedError } from '../../middleware/errors';
-import { confirmOrderDelivered, getOrderForViewer, listMyOrders, payForOrder, shipOrder, syncPayment } from './service';
-import type { PayOrderInput, ShipOrderInput } from './schema';
+import {
+  confirmDeliveryWithCode,
+  getOrderForViewer,
+  listMyOrders,
+  payForOrder,
+  regenerateCode,
+  setShippingAddress,
+  shipOrder,
+  syncPayment,
+} from './service';
+import type { ConfirmDeliveryInput, PayOrderInput } from './schema';
 
 export async function listOrdersHandler(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -52,13 +61,24 @@ export async function syncPaymentHandler(req: Request, res: Response, next: Next
   }
 }
 
+export async function setShippingAddressHandler(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.user) {
+      throw new UnauthorizedError('UNAUTHENTICATED');
+    }
+    const order = await setShippingAddress(req.user.id, req.params.id as string, req.body);
+    res.status(200).json({ order });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function shipOrderHandler(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     if (!req.user) {
       throw new UnauthorizedError('UNAUTHENTICATED');
     }
-    const { carrier, trackingNumber } = req.body as ShipOrderInput;
-    const order = await shipOrder(req.user.id, req.params.id as string, { carrier, trackingNumber });
+    const order = await shipOrder(req.user.id, req.params.id as string);
     res.status(200).json({ order });
   } catch (err) {
     next(err);
@@ -70,7 +90,20 @@ export async function confirmDeliveryHandler(req: Request, res: Response, next: 
     if (!req.user) {
       throw new UnauthorizedError('UNAUTHENTICATED');
     }
-    const order = await confirmOrderDelivered(req.user.id, req.params.id as string);
+    const { code } = req.body as ConfirmDeliveryInput;
+    const order = await confirmDeliveryWithCode(req.user.id, req.params.id as string, code);
+    res.status(200).json({ order });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function regenerateCodeHandler(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.user) {
+      throw new UnauthorizedError('UNAUTHENTICATED');
+    }
+    const order = await regenerateCode(req.user.id, req.params.id as string);
     res.status(200).json({ order });
   } catch (err) {
     next(err);

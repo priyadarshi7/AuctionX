@@ -39,6 +39,11 @@ export async function createPaymentIntentForOrder(
   if (order.status !== 'PENDING_PAYMENT') {
     throw new ConflictError('ORDER_NOT_PAYABLE', `This order is ${order.status}, not awaiting payment`);
   }
+  // A paid order must be shippable (ADR-0045): the seller cannot send a parcel
+  // to nowhere, so the buyer says where it goes before any money moves.
+  if (!order.shippingAddress) {
+    throw new ConflictError('SHIPPING_ADDRESS_REQUIRED', 'Add your delivery address before paying');
+  }
 
   // Business-level idempotency: if an attempt is already in flight (or
   // already succeeded), don't start another — this catches the common case

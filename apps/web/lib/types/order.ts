@@ -5,6 +5,27 @@
 export type OrderStatus = 'PENDING_PAYMENT' | 'PAID' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
 export type OrderCancelReason = 'PAYMENT_TIMEOUT' | 'ADMIN';
 
+export type ShippingAddress = {
+  fullName: string;
+  line1: string;
+  line2?: string;
+  city: string;
+  region: string;
+  postalCode: string;
+  country: string;
+  phone: string;
+};
+
+export type ShipmentEventType = 'LABEL_CREATED' | 'IN_TRANSIT' | 'OUT_FOR_DELIVERY' | 'DELIVERED';
+
+export type ShipmentEvent = {
+  id: string;
+  type: ShipmentEventType;
+  description: string;
+  location: string | null;
+  occurredAt: string;
+};
+
 export type Order = {
   id: string;
   auctionId: string;
@@ -20,6 +41,14 @@ export type Order = {
   deliveredAt: string | null;
   cancelledAt: string | null;
   cancelReason: OrderCancelReason | null;
+  // Only the buyer, or the seller while a parcel is to be sent, ever gets this.
+  shippingAddress: ShippingAddress | null;
+  deliveredVia: 'OTP' | 'AUTO' | null;
+  deliveryCodeLocked: boolean;
+  // Present on the single-order response only (not the list).
+  shipmentEvents?: ShipmentEvent[];
+  // Only for the BUYER of a SHIPPED order.
+  deliveryCode?: string | null;
   createdAt: string;
   updatedAt: string;
 };

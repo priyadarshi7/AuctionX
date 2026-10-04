@@ -3,6 +3,10 @@ import { createApp } from '../../src/app';
 import { prisma } from '../../src/infrastructure/database/prisma';
 import { runOnce as runClosingWorkerOnce } from '../../src/infrastructure/jobs/auctionClosingWorker';
 import { runOnce as runDeadlineWorkerOnce } from '../../src/infrastructure/jobs/orderPaymentDeadlineWorker';
+import { Prisma } from '@prisma/client';
+import { runOnce as runAutoConfirmOnce } from '../../src/infrastructure/jobs/orderAutoConfirmWorker';
+import { runOnce as runSimulatorOnce } from '../../src/infrastructure/jobs/shipmentSimulatorWorker';
+import { TEST_ADDRESS } from '../helpers/address';
 import { paymentProvider } from '../../src/infrastructure/payments';
 import { ORDER_PAYMENT_WINDOW_MS } from '../../src/modules/orders/lifecycle';
 import { applyPaymentWebhookEvent } from '../../src/modules/payments/repository';
@@ -57,16 +61,36 @@ async function createOrder(sellerToken: string, buyerToken: string, opts: { paid
 
   let order = await prisma.order.findUniqueOrThrow({ where: { auctionId } });
   if (opts.paid) {
-    order = await prisma.order.update({ where: { id: order.id }, data: { status: 'PAID' } });
+    order = await prisma.order.update({ where: { id: order.id }, data: { status: 'PAID', shippingAddress: TEST_ADDRESS } });
   }
   return order;
 }
 
-const ship = (orderId: string, token: string, body: Record<string, unknown> = { carrier: 'DHL', trackingNumber: 'TRK123' }) =>
-  request(app).post(`/api/v1/orders/${orderId}/ship`).set('Authorization', `Bearer ${token}`).send(body);
+const ship = (orderId: string, token: string) =>
+  request(app).post(`/api/v1/orders/${orderId}/ship`).set('Authorization', `Bearer ${token}`);
 
-const confirmDelivery = (orderId: string, token: string) =>
-  request(app).post(`/api/v1/orders/${orderId}/confirm-delivery`).set('Authorization', `Bearer ${token}`);
+const confirmDelivery = (orderId: string, token: string, code: string) =>
+  request(app)
+    .post(`/api/v1/orders/${orderId}/confirm-delivery`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ code });
+
+const getOrder = (orderId: string, token: string) =>
+  request(app).get(`/api/v1/orders/${orderId}`).set('Authorization', `Bearer ${token}`);
+
+const regenerate = (orderId: string, token: string) =>
+  request(app).post(`/api/v1/orders/${orderId}/delivery-code/regenerate`).set('Authorization', `Bearer ${token}`);
+
+const saveAddress = (orderId: string, token: string, body: Record<string, unknown> = TEST_ADDRESS) =>
+  request(app).put(`/api/v1/orders/${orderId}/shipping-address`).set('Authorization', `Bearer ${token}`).send(body);
+
+// The code the buyer would see on their order page.
+async function buyerCode(orderId: string, buyerToken: string): Promise<string> {
+  const res = await getOrder(orderId, buyerToken);
+  return res.body.order.deliveryCode as string;
+}
+
+const wrongCode = (real: string) => (real === '000000' ? '000001' : '000000');
 
 // Lifecycle events must actually reach the outbox (that's what the
 // notification consumer reads) — asserting on the HTTP response alone would
@@ -99,6 +123,72 @@ describe('order payment deadline', () => {
   });
 });
 
+describe('shipping address', () => {
+  it('lets only the buyer set it, validates it, and refuses once the order has shipped', async () => {
+    const seller = await registerAndLogin('seller');
+    const buyer = await registerAndLogin('buyer');
+    const order = await createOrder(seller.accessToken, buyer.accessToken, { paid: false });
+
+    expect((await saveAddress(order.id, seller.accessToken)).status).toBe(403);
+    const bad = await saveAddress(order.id, buyer.accessToken, { ...TEST_ADDRESS, country: 'India', phone: 'abc' });
+    expect(bad.status).toBe(400);
+    expect(Object.keys(bad.body.error.details)).toEqual(expect.arrayContaining(['country', 'phone']));
+    expect((await saveAddress(order.id, buyer.accessToken, { ...TEST_ADDRESS, line1: 'bad\nline' })).status).toBe(400);
+
+    const ok = await saveAddress(order.id, buyer.accessToken, { ...TEST_ADDRESS, country: 'in' });
+    expect(ok.status).toBe(200);
+    expect(ok.body.order.shippingAddress).toMatchObject({ city: 'Pune', country: 'IN' });
+
+    await prisma.order.update({ where: { id: order.id }, data: { status: 'SHIPPED' } });
+    const late = await saveAddress(order.id, buyer.accessToken);
+    expect(late.status).toBe(409);
+    expect(late.body.error.code).toBe('ORDER_ADDRESS_LOCKED');
+  });
+
+  it('is required before paying', async () => {
+    const seller = await registerAndLogin('seller');
+    const buyer = await registerAndLogin('buyer');
+    const order = await createOrder(seller.accessToken, buyer.accessToken, { paid: false });
+
+    const res = await request(app)
+      .post(`/api/v1/orders/${order.id}/pay`)
+      .set('Authorization', `Bearer ${buyer.accessToken}`)
+      .send({ idempotencyKey: 'k1' });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('SHIPPING_ADDRESS_REQUIRED');
+
+    await saveAddress(order.id, buyer.accessToken);
+    expect(
+      (await request(app).post(`/api/v1/orders/${order.id}/pay`).set('Authorization', `Bearer ${buyer.accessToken}`).send({ idempotencyKey: 'k2' })).status,
+    ).toBe(200);
+  });
+
+  it('is visible to the buyer, to the seller only while a parcel is to be sent, and to nobody else', async () => {
+    const seller = await registerAndLogin('seller');
+    const buyer = await registerAndLogin('buyer');
+    const stranger = await registerAndLogin('stranger');
+    const order = await createOrder(seller.accessToken, buyer.accessToken, { paid: false });
+    await saveAddress(order.id, buyer.accessToken);
+
+    // Before payment the seller gets no address.
+    expect((await getOrder(order.id, seller.accessToken)).body.order.shippingAddress).toBeNull();
+    expect((await getOrder(order.id, buyer.accessToken)).body.order.shippingAddress).not.toBeNull();
+
+    await prisma.order.update({ where: { id: order.id }, data: { status: 'PAID' } });
+    expect((await getOrder(order.id, seller.accessToken)).body.order.shippingAddress).toMatchObject({ postalCode: '411001' });
+    expect((await getOrder(order.id, stranger.accessToken)).status).toBe(403);
+
+    // Never in a list the seller sees before shipping is relevant, and never the private counters.
+    const list = await request(app).get('/api/v1/orders').set('Authorization', `Bearer ${seller.accessToken}`);
+    const row = list.body.orders.find((o: { id: string }) => o.id === order.id);
+    expect(row).not.toHaveProperty('deliveryOtpVersion');
+    expect(row).not.toHaveProperty('deliveryOtpAttempts');
+
+    await prisma.order.update({ where: { id: order.id }, data: { status: 'DELIVERED' } });
+    expect((await getOrder(order.id, seller.accessToken)).body.order.shippingAddress).toBeNull();
+  });
+});
+
 describe('POST /api/v1/orders/:id/ship', () => {
   it('lets only the seller ship', async () => {
     const seller = await registerAndLogin('seller');
@@ -112,34 +202,32 @@ describe('POST /api/v1/orders/:id/ship', () => {
     expect((await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe('PAID');
   });
 
-  it('rejects shipping an order that has not been paid', async () => {
+  it('rejects shipping an order that has not been paid, or that has no address', async () => {
     const seller = await registerAndLogin('seller');
     const buyer = await registerAndLogin('buyer');
-    const order = await createOrder(seller.accessToken, buyer.accessToken, { paid: false });
-
-    const res = await ship(order.id, seller.accessToken);
+    const unpaid = await createOrder(seller.accessToken, buyer.accessToken, { paid: false });
+    const res = await ship(unpaid.id, seller.accessToken);
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('ORDER_NOT_SHIPPABLE');
+
+    const noAddress = await createOrder(seller.accessToken, buyer.accessToken, { paid: true });
+    await prisma.order.update({ where: { id: noAddress.id }, data: { shippingAddress: Prisma.DbNull } });
+    const missing = await ship(noAddress.id, seller.accessToken);
+    expect(missing.status).toBe(409);
+    expect(missing.body.error.code).toBe('SHIPPING_ADDRESS_REQUIRED');
   });
 
-  it('rejects a missing or blank carrier / tracking number', async () => {
+  it('assigns the carrier and tracking number itself, opens the timeline, and writes exactly one order.shipped event', async () => {
     const seller = await registerAndLogin('seller');
     const buyer = await registerAndLogin('buyer');
     const order = await createOrder(seller.accessToken, buyer.accessToken, { paid: true });
 
-    expect((await ship(order.id, seller.accessToken, { carrier: 'DHL' })).status).toBe(400);
-    expect((await ship(order.id, seller.accessToken, { carrier: '  ', trackingNumber: 'X' })).status).toBe(400);
-  });
-
-  it('marks a paid order SHIPPED, records the details, and writes exactly one order.shipped event', async () => {
-    const seller = await registerAndLogin('seller');
-    const buyer = await registerAndLogin('buyer');
-    const order = await createOrder(seller.accessToken, buyer.accessToken, { paid: true });
-
-    const res = await ship(order.id, seller.accessToken, { carrier: '  DHL ', trackingNumber: 'TRK-42' });
+    const res = await ship(order.id, seller.accessToken);
     expect(res.status).toBe(200);
-    expect(res.body.order).toMatchObject({ status: 'SHIPPED', carrier: 'DHL', trackingNumber: 'TRK-42' });
+    expect(res.body.order).toMatchObject({ status: 'SHIPPED', carrier: expect.stringContaining('AuctionX Express') });
+    expect(res.body.order.trackingNumber).toMatch(/^AX\d{12}$/);
     expect(res.body.order.shippedAt).toEqual(expect.any(String));
+    expect(res.body.order.shipmentEvents.map((e: { type: string }) => e.type)).toEqual(['LABEL_CREATED']);
 
     const events = await orderEvents(order.id, 'order.shipped');
     expect(events).toHaveLength(1);
@@ -148,26 +236,24 @@ describe('POST /api/v1/orders/:id/ship', () => {
       orderId: order.id,
       buyerId: order.buyerId,
       sellerId: order.sellerId,
-      carrier: 'DHL',
-      trackingNumber: 'TRK-42',
+      trackingNumber: res.body.order.trackingNumber,
     });
   });
 
-  it('treats an identical repeat as a success without a second event, but rejects different details', async () => {
+  it('treats a repeat as a success without a second event or a second tracking number', async () => {
     const seller = await registerAndLogin('seller');
     const buyer = await registerAndLogin('buyer');
     const order = await createOrder(seller.accessToken, buyer.accessToken, { paid: true });
 
-    expect((await ship(order.id, seller.accessToken)).status).toBe(200);
-    expect((await ship(order.id, seller.accessToken)).status).toBe(200);
+    const first = await ship(order.id, seller.accessToken);
+    const again = await ship(order.id, seller.accessToken);
+    expect([first.status, again.status]).toEqual([200, 200]);
+    expect(again.body.order.trackingNumber).toBe(first.body.order.trackingNumber);
     expect(await orderEvents(order.id, 'order.shipped')).toHaveLength(1);
-
-    const different = await ship(order.id, seller.accessToken, { carrier: 'UPS', trackingNumber: 'OTHER' });
-    expect(different.status).toBe(409);
-    expect((await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).carrier).toBe('DHL');
+    expect(await prisma.shipmentEvent.count({ where: { orderId: order.id } })).toBe(1);
   });
 
-  it('lets two simultaneous identical requests both succeed while shipping exactly once', async () => {
+  it('lets two simultaneous requests both succeed while shipping exactly once', async () => {
     const seller = await registerAndLogin('seller');
     const buyer = await registerAndLogin('buyer');
     const order = await createOrder(seller.accessToken, buyer.accessToken, { paid: true });
@@ -178,36 +264,148 @@ describe('POST /api/v1/orders/:id/ship', () => {
   });
 });
 
-describe('POST /api/v1/orders/:id/confirm-delivery', () => {
-  it('lets only the buyer confirm, and only after shipping', async () => {
+describe('tracking timeline', () => {
+  it('advances to in transit and out for delivery on its own, once each, and never to delivered', async () => {
+    const seller = await registerAndLogin('seller');
+    const buyer = await registerAndLogin('buyer');
+    const order = await createOrder(seller.accessToken, buyer.accessToken, { paid: true });
+    await ship(order.id, seller.accessToken);
+    const types = async () =>
+      (await getOrder(order.id, buyer.accessToken)).body.order.shipmentEvents.map((e: { type: string }) => e.type);
+
+    const step = 1_000;
+    await runSimulatorOnce(new Date(), step); // too early: nothing yet
+    expect(await types()).toEqual(['LABEL_CREATED']);
+
+    await runSimulatorOnce(new Date(Date.now() + step + 100), step);
+    expect(await types()).toEqual(['LABEL_CREATED', 'IN_TRANSIT']);
+
+    await runSimulatorOnce(new Date(Date.now() + 3 * step), step);
+    await runSimulatorOnce(new Date(Date.now() + 4 * step), step); // repeated ticks add nothing
+    expect(await types()).toEqual(['LABEL_CREATED', 'IN_TRANSIT', 'OUT_FOR_DELIVERY']);
+
+    await runSimulatorOnce(new Date(Date.now() + 99 * step), step);
+    expect(await types()).not.toContain('DELIVERED');
+  });
+});
+
+describe('POST /api/v1/orders/:id/confirm-delivery (the delivery code)', () => {
+  async function shippedOrder() {
+    const seller = await registerAndLogin('seller');
+    const buyer = await registerAndLogin('buyer');
+    const order = await createOrder(seller.accessToken, buyer.accessToken, { paid: true });
+    await ship(order.id, seller.accessToken);
+    return { seller, buyer, order };
+  }
+
+  it('shows the code only to the buyer of a shipped order', async () => {
+    const { seller, buyer, order } = await shippedOrder();
+    const code = await buyerCode(order.id, buyer.accessToken);
+    expect(code).toMatch(/^\d{6}$/);
+    expect((await getOrder(order.id, seller.accessToken)).body.order.deliveryCode).toBeNull();
+    expect(JSON.stringify((await getOrder(order.id, seller.accessToken)).body)).not.toContain(code);
+    // Stable across visits.
+    expect(await buyerCode(order.id, buyer.accessToken)).toBe(code);
+  });
+
+  it('is the only way to deliver: the buyer cannot, early requests are refused, and the seller needs the right code', async () => {
     const seller = await registerAndLogin('seller');
     const buyer = await registerAndLogin('buyer');
     const order = await createOrder(seller.accessToken, buyer.accessToken, { paid: true });
 
-    const early = await confirmDelivery(order.id, buyer.accessToken);
+    const early = await confirmDelivery(order.id, seller.accessToken, '123456');
     expect(early.status).toBe(409);
     expect(early.body.error.code).toBe('ORDER_NOT_DELIVERABLE');
 
     await ship(order.id, seller.accessToken);
-    expect((await confirmDelivery(order.id, seller.accessToken)).status).toBe(403);
+    const code = await buyerCode(order.id, buyer.accessToken);
+    expect((await confirmDelivery(order.id, buyer.accessToken, code)).status).toBe(403);
+    expect((await confirmDelivery(order.id, seller.accessToken, 'abc')).status).toBe(400);
     expect((await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe('SHIPPED');
   });
 
-  it('marks a shipped order DELIVERED with exactly one order.delivered event, and is idempotent', async () => {
+  it('delivers with the right code, once, with a DELIVERED tracking event and both parties notified', async () => {
+    const { seller, buyer, order } = await shippedOrder();
+    const code = await buyerCode(order.id, buyer.accessToken);
+
+    const res = await confirmDelivery(order.id, seller.accessToken, code);
+    expect(res.status).toBe(200);
+    expect(res.body.order.status).toBe('DELIVERED');
+    expect(res.body.order.deliveredVia).toBe('OTP');
+    expect(res.body.order.shipmentEvents.map((e: { type: string }) => e.type)).toContain('DELIVERED');
+
+    expect((await confirmDelivery(order.id, seller.accessToken, code)).status).toBe(200);
+    const events = await orderEvents(order.id, 'order.delivered');
+    expect(events).toHaveLength(1);
+    expect(events[0]!.payload).toMatchObject({ orderId: order.id, method: 'OTP' });
+  });
+
+  it('counts wrong guesses, locks after five, and only the buyer can unlock it with a new code', async () => {
+    const { seller, buyer, order } = await shippedOrder();
+    const code = await buyerCode(order.id, buyer.accessToken);
+
+    for (let left = 4; left >= 0; left -= 1) {
+      const res = await confirmDelivery(order.id, seller.accessToken, wrongCode(code));
+      expect(res.status).toBe(400);
+      expect(res.body.error.details.code[0]).toContain(`${left} ${left === 1 ? 'try' : 'tries'} left`);
+    }
+    // Even the RIGHT code is refused once locked.
+    const locked = await confirmDelivery(order.id, seller.accessToken, code);
+    expect(locked.status).toBe(409);
+    expect(locked.body.error.code).toBe('DELIVERY_CODE_LOCKED');
+    expect((await getOrder(order.id, buyer.accessToken)).body.order.deliveryCodeLocked).toBe(true);
+    expect((await regenerate(order.id, seller.accessToken)).status).toBe(403);
+
+    const fresh = await regenerate(order.id, buyer.accessToken);
+    expect(fresh.status).toBe(200);
+    expect(fresh.body.order.deliveryCode).not.toBe(code);
+    expect(fresh.body.order.deliveryCodeLocked).toBe(false);
+
+    // The old code no longer works; the new one does.
+    expect((await confirmDelivery(order.id, seller.accessToken, code)).status).toBe(400);
+    expect((await confirmDelivery(order.id, seller.accessToken, fresh.body.order.deliveryCode)).status).toBe(200);
+  });
+
+  it('cannot be raced past the attempt limit by simultaneous guesses', async () => {
+    const { seller, buyer, order } = await shippedOrder();
+    const code = await buyerCode(order.id, buyer.accessToken);
+    const results = await Promise.all(
+      Array.from({ length: 12 }, () => confirmDelivery(order.id, seller.accessToken, wrongCode(code))),
+    );
+    expect(results.filter((r) => r.status === 400)).toHaveLength(5);
+    expect(results.filter((r) => r.status === 409)).toHaveLength(7);
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).deliveryOtpAttempts).toBe(5);
+  });
+
+  it('refuses a code regeneration unless the order is shipped', async () => {
     const seller = await registerAndLogin('seller');
     const buyer = await registerAndLogin('buyer');
     const order = await createOrder(seller.accessToken, buyer.accessToken, { paid: true });
-    await ship(order.id, seller.accessToken);
+    const res = await regenerate(order.id, buyer.accessToken);
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('ORDER_NOT_SHIPPED');
+  });
+});
 
-    const res = await confirmDelivery(order.id, buyer.accessToken);
-    expect(res.status).toBe(200);
-    expect(res.body.order.status).toBe('DELIVERED');
-    expect(res.body.order.deliveredAt).toEqual(expect.any(String));
+describe('auto-confirming a delivery nobody completed', () => {
+  it('delivers an order that has been shipped longer than the window, once, and leaves recent ones alone', async () => {
+    const seller = await registerAndLogin('seller');
+    const buyer = await registerAndLogin('buyer');
+    const old = await createOrder(seller.accessToken, buyer.accessToken, { paid: true });
+    const recent = await createOrder(seller.accessToken, buyer.accessToken, { paid: true });
+    await ship(old.id, seller.accessToken);
+    await ship(recent.id, seller.accessToken);
+    await prisma.order.update({ where: { id: old.id }, data: { shippedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000) } });
 
-    expect((await confirmDelivery(order.id, buyer.accessToken)).status).toBe(200);
-    const events = await orderEvents(order.id, 'order.delivered');
+    await runAutoConfirmOnce();
+    await runAutoConfirmOnce(); // a second pass is a no-op
+
+    const after = await prisma.order.findUniqueOrThrow({ where: { id: old.id } });
+    expect(after).toMatchObject({ status: 'DELIVERED', deliveredVia: 'AUTO' });
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: recent.id } })).status).toBe('SHIPPED');
+    const events = await orderEvents(old.id, 'order.delivered');
     expect(events).toHaveLength(1);
-    expect(events[0]!.payload).toMatchObject({ orderId: order.id, sellerId: order.sellerId, buyerId: order.buyerId });
+    expect(events[0]!.payload).toMatchObject({ method: 'AUTO' });
   });
 });
 

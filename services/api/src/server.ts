@@ -23,6 +23,8 @@ import { reindexAllAuctions } from './modules/search/service';
 import { startAiValuationConsumer, stopAiValuationConsumer } from './modules/ai/consumer';
 
 import { paymentProvider } from './infrastructure/payments';
+import { startShipmentSimulatorWorker, stopShipmentSimulatorWorker } from './infrastructure/jobs/shipmentSimulatorWorker';
+import { startOrderAutoConfirmWorker, stopOrderAutoConfirmWorker } from './infrastructure/jobs/orderAutoConfirmWorker';
 import { startDocumentOrphanSweeper, stopDocumentOrphanSweeper } from './infrastructure/jobs/documentOrphanSweeper';
 
 const app = createApp();
@@ -43,6 +45,8 @@ if (env.STRIPE_SECRET_KEY && !env.STRIPE_WEBHOOK_SECRET) {
 startAuctionClosingWorker();
 startOrderPaymentDeadlineWorker();
 startDocumentOrphanSweeper();
+startShipmentSimulatorWorker();
+startOrderAutoConfirmWorker();
 // Attached to the SAME http.Server app.listen() returned, not a second
 // port — see gateway.ts's module comment for why this is one process today.
 startWebSocketGateway(server);
@@ -108,6 +112,8 @@ function shutdown(signal: string): void {
   stopAuctionClosingWorker();
   stopOrderPaymentDeadlineWorker();
   stopDocumentOrphanSweeper();
+  stopShipmentSimulatorWorker();
+  stopOrderAutoConfirmWorker();
   stopOutboxPublisherWorker();
   stopWebSocketGateway();
   void stopNotificationsConsumer().catch((err: unknown) => {

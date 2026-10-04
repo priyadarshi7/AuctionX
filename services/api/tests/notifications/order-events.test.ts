@@ -48,19 +48,17 @@ describe('order lifecycle notifications', () => {
     expect(rows[0]!.data).toEqual({ carrier: 'DHL', trackingNumber: 'TRK-9' });
   });
 
-  it('order.delivered notifies the seller only', async () => {
+  it('order.delivered notifies both parties once each, even on redelivery', async () => {
     const buyer = await makeUser('buyer2');
     const seller = await makeUser('seller2');
-    await handleNotificationEvent(
-      'payment-events',
-      orderId,
-      { type: 'order.delivered', orderId, auctionId, buyerId: buyer.id, sellerId: seller.id },
-      `delivered-${randomUUID()}`,
-    );
+    const messageId = `delivered-${randomUUID()}`;
+    const event = { type: 'order.delivered', orderId, auctionId, buyerId: buyer.id, sellerId: seller.id, method: 'OTP' };
+    await handleNotificationEvent('payment-events', orderId, event, messageId);
+    await handleNotificationEvent('payment-events', orderId, event, messageId);
 
     const rows = await prisma.notification.findMany({ where: { orderId, type: 'ORDER_DELIVERED', userId: { in: [buyer.id, seller.id] } } });
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.userId).toBe(seller.id);
+    expect(rows.map((r) => r.userId).sort()).toEqual([buyer.id, seller.id].sort());
+    expect(rows[0]!.data).toEqual({ method: 'OTP' });
   });
 
   it('order.cancelled notifies both buyer and seller', async () => {

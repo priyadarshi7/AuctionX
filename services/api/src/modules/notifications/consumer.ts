@@ -6,6 +6,7 @@ import { emailSender } from '../../infrastructure/email/sender';
 import { logger } from '../../infrastructure/observability/logger';
 import { pushNotification } from '../../infrastructure/realtime/notificationEvents';
 import { env } from '../../config/env';
+import { deliveryCodeFor } from '../orders/deliveryOtp';
 import { createConsumer, runConsumer, type MessageId } from '../../infrastructure/kafka/consumer';
 
 // Backend only ever needs this for the two transactional emails below — the
@@ -127,6 +128,9 @@ type OrderDeliveredPayload = {
   auctionId: string;
   buyerId: string;
   sellerId: string;
+  // How delivery was completed (ADR-0045). Absent on events written before
+  // the delivery-code flow existed.
+  method?: 'OTP' | 'AUTO';
 };
 
 type OrderCancelledPayload = {
@@ -292,10 +296,19 @@ export async function handleNotificationEvent(topic: string, _key: string | null
         ]);
         if (buyer) {
           const itemLabel = auction ? `"${escapeHtml(auction.title)}"` : 'your item';
+          // The delivery code is derived, so it can be recomputed here instead
+          // of travelling through Kafka (ADR-0045).
+          const order = await prisma.order.findUnique({
+            where: { id: payload.orderId },
+            select: { id: true, deliveryOtpVersion: true },
+          });
+          const codeLine = order
+            ? `<p>Your delivery code is <strong style="font-size:18px;letter-spacing:2px">${deliveryCodeFor(order.id, order.deliveryOtpVersion)}</strong>. Give it to the courier only when the parcel is in your hands. It is also on your order page.</p>`
+            : '';
           await sendTransactionalEmail(
             buyer.email,
             'Your AuctionX order has shipped',
-            `<p>${itemLabel} is on its way via ${escapeHtml(payload.carrier)} (tracking: ${escapeHtml(payload.trackingNumber)}).</p><p>When it arrives, confirm delivery on <a href="${env.FRONTEND_URL}/orders/${payload.orderId}">your order</a>.</p>`,
+            `<p>${itemLabel} is on its way via ${escapeHtml(payload.carrier)} (tracking: ${escapeHtml(payload.trackingNumber)}).</p>${codeLine}<p>Follow it on <a href="${env.FRONTEND_URL}/orders/${payload.orderId}">your order</a>.</p>`,
           );
         }
       }
@@ -354,15 +367,22 @@ export async function handleNotificationEvent(topic: string, _key: string | null
       return;
     }
 
-    case 'order.delivered':
-      await createNotificationIdempotently(messageId, {
-        userId: payload.sellerId,
-        type: 'ORDER_DELIVERED',
-        orderId: payload.orderId,
-        auctionId: payload.auctionId,
-        data: {},
-      });
+    case 'order.delivered': {
+      // Both parties: the seller entered the buyer's code (or the fallback
+      // fired), so each side gets a record that the order is complete
+      // (ADR-0045). One row per user keeps a redelivery idempotent.
+      const data = { method: payload.method ?? null };
+      for (const userId of [payload.sellerId, payload.buyerId]) {
+        await createNotificationIdempotently(messageId, {
+          userId,
+          type: 'ORDER_DELIVERED',
+          orderId: payload.orderId,
+          auctionId: payload.auctionId,
+          data,
+        });
+      }
       return;
+    }
   }
 }
 

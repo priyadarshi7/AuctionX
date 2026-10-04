@@ -223,10 +223,15 @@ export async function moderateAuctionAsAdmin(
 // Orders
 // ---------------------------------------------------------------------------
 
-export type AdminOrderView = Order & { buyerEmail: string; sellerEmail: string; needsRefund: boolean };
+export type AdminOrderView = Omit<Order, 'shippingAddress' | 'deliveryOtpVersion' | 'deliveryOtpAttempts'> & {
+  buyerEmail: string;
+  sellerEmail: string;
+  needsRefund: boolean;
+};
 
 function toAdminOrderView(row: AdminOrderRow): AdminOrderView {
-  const { buyer, seller, payments, ...order } = row;
+  // The delivery address and code counters are private to the buyer/seller.
+  const { buyer, seller, payments, shippingAddress: _address, deliveryOtpVersion: _version, deliveryOtpAttempts: _attempts, ...order } = row;
   return {
     ...order,
     buyerEmail: buyer.email,

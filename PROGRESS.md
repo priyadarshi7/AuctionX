@@ -165,7 +165,16 @@ DEPLOY-001 notes below are the history of getting there. Since then:
   `STRIPE_SECRET_KEY` (sk_test_) on Render, (3) in Stripe (test mode) add the
   webhook endpoint and set `STRIPE_WEBHOOK_SECRET`, (4) push/deploy.
   The Stripe SDK calls have not yet been run against Stripe itself.
-- Tests: 296 backend tests pass under `jest --runInBand` (web typecheck and
+- **SHIP-001 (ADR-0045):** buyer saves a delivery address BEFORE paying
+  (required); "Mark as shipped" needs no input (a demo courier assigns carrier +
+  tracking number and opens a tracking timeline that a worker advances every
+  `SHIPPING_SIM_STEP_SECONDS`); delivery is completed by the SELLER entering the
+  buyer's 6-digit code (HMAC-derived from order id + version, 5 attempts then
+  locked until the buyer regenerates); 7-day auto-confirm fallback. The buyer's
+  "I received it" click is gone. Migration
+  `20261004160000_shipping_address_tracking_delivery_otp` (additive; apply to
+  production before deploying). UI components in `app/orders/[id]/`.
+- Tests: 304 backend tests pass under `jest --runInBand` (web typecheck and
   lint clean). Local Redpanda now advertises `127.0.0.1:9092` (recreate the
   container: `docker compose up -d --force-recreate redpanda`) so
   `tests/notifications/notifications.test.ts` should run again; not yet

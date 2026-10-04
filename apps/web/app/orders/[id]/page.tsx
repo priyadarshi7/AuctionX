@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useRef } from 'react';
 import { ApiError } from '@/lib/apiClient';
-import { confirmDeliveryRequest, getOrderRequest, payOrderRequest, syncPaymentRequest } from '@/lib/orders';
+import { getOrderRequest, payOrderRequest, syncPaymentRequest } from '@/lib/orders';
 import { formatCents } from '@/lib/format';
 import { useRequireAuth } from '@/lib/useRequireAuth';
 import type { Order } from '@/lib/types/order';
@@ -13,7 +13,10 @@ import { Button, ButtonLink } from '../../components/ui/Button';
 import { Notice } from '../../components/ui/Notice';
 import { PageLoading, PageMessage } from '../../components/ui/Page';
 import { OrderStatusPill } from '../../components/ui/StatusPill';
+import { AddressForm } from './AddressForm';
+import { DeliveryCodeForm, DeliveryCodePanel } from './DeliveryCode';
 import { ShipForm } from './ShipForm';
+import { TrackingTimeline } from './TrackingTimeline';
 
 type StepState = 'done' | 'current' | 'todo';
 
@@ -55,8 +58,8 @@ function Timeline({ order }: { order: Order }) {
           {
             label: 'Delivered',
             detail: delivered
-              ? `Confirmed by the buyer${order.deliveredAt ? ` on ${new Date(order.deliveredAt).toLocaleDateString()}` : ''}.`
-              : 'The buyer confirms when it arrives.',
+              ? `${order.deliveredVia === 'AUTO' ? 'Automatically confirmed' : 'Confirmed with the delivery code'}${order.deliveredAt ? ` on ${new Date(order.deliveredAt).toLocaleDateString()}` : ''}.`
+              : 'Completed when the seller enters the buyer’s delivery code at handover.',
             state: delivered ? 'done' : shipped ? 'current' : 'todo',
           },
         ] as { label: string; detail: string; state: StepState }[])),
@@ -109,13 +112,11 @@ export default function OrderDetailPage() {
     // MockPaymentProvider.createPaymentIntent (ADR-0025) — polling while
     // still pending picks that up without the buyer needing to refresh.
     // Stops polling the instant it reaches a terminal state.
-    refetchInterval: (query) => (query.state.data?.order.status === 'PENDING_PAYMENT' ? 1000 : false),
-  });
-
-  const confirmDelivery = useMutation({
-    mutationFn: () => confirmDeliveryRequest(auth.accessToken!, orderId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['orders'] });
+    // A shipped order is polled more gently so the tracking timeline moves
+    // on its own.
+    refetchInterval: (query) => {
+      const status = query.state.data?.order.status;
+      return status === 'PENDING_PAYMENT' ? 1000 : status === 'SHIPPED' ? 5000 : false;
     },
   });
 
@@ -182,8 +183,6 @@ export default function OrderDetailPage() {
   const isBuyer = order.buyerId === auth.user.id;
   const redirecting = pay.isSuccess && Boolean(pay.data.checkoutUrl);
   const paying = pay.isPending || pay.isSuccess;
-  const confirmError =
-    confirmDelivery.error instanceof ApiError ? confirmDelivery.error.message : confirmDelivery.error ? 'Something went wrong.' : null;
   const payError = pay.error instanceof ApiError ? pay.error.message : pay.error ? 'Something went wrong.' : null;
 
   return (
@@ -205,11 +204,15 @@ export default function OrderDetailPage() {
           </div>
 
           <div className="mt-6 flex flex-col gap-3">
+            {isBuyer && order.status === 'PENDING_PAYMENT' && auth.accessToken && (
+              <AddressForm orderId={order.id} accessToken={auth.accessToken} address={order.shippingAddress} />
+            )}
             {isBuyer && order.status === 'PENDING_PAYMENT' && (
               <>
-                <Button onClick={() => pay.mutate()} disabled={paying} className="w-full">
+                <Button onClick={() => pay.mutate()} disabled={paying || !order.shippingAddress} className="w-full">
                   {redirecting ? 'Taking you to secure payment…' : paying ? 'Processing…' : `Pay ${formatCents(order.amountCents)}`}
                 </Button>
+                {!order.shippingAddress && <p className="text-xs text-ink/60">Save your delivery address above to enable payment.</p>}
                 {payError && <Notice tone="error">{payError}</Notice>}
                 {returned === 'cancelled' && !paying && (
                   <Notice tone="info">Payment was cancelled. Nothing was charged. You can try again.</Notice>
@@ -235,24 +238,22 @@ export default function OrderDetailPage() {
               </p>
             )}
             {order.status === 'PAID' && isBuyer && (
-              <Notice tone="success">Payment received. The seller will ship your item soon.</Notice>
-            )}
-            {order.status === 'PAID' && !isBuyer && auth.accessToken && (
-              <ShipForm orderId={order.id} accessToken={auth.accessToken} />
-            )}
-            {order.status === 'SHIPPED' && isBuyer && (
               <>
-                <Notice tone="info">
-                  Shipped via {order.carrier} (tracking {order.trackingNumber}). Once it arrives, confirm below.
-                </Notice>
-                <Button onClick={() => confirmDelivery.mutate()} disabled={confirmDelivery.isPending} className="w-full">
-                  {confirmDelivery.isPending ? 'Confirming…' : 'I received it'}
-                </Button>
-                {confirmError && <Notice tone="error">{confirmError}</Notice>}
+                <Notice tone="success">Payment received. The seller will ship your item soon.</Notice>
+                {auth.accessToken && <AddressForm orderId={order.id} accessToken={auth.accessToken} address={order.shippingAddress} />}
               </>
             )}
-            {order.status === 'SHIPPED' && !isBuyer && (
-              <Notice tone="info">Shipped. Waiting for the buyer to confirm delivery.</Notice>
+            {order.status === 'PAID' && !isBuyer && auth.accessToken && (
+              <ShipForm orderId={order.id} accessToken={auth.accessToken} address={order.shippingAddress} />
+            )}
+            {order.status === 'SHIPPED' && isBuyer && auth.accessToken && (
+              <>
+                <Notice tone="info">On its way. Follow it under Tracking, and keep your delivery code for handover.</Notice>
+                <DeliveryCodePanel order={order} accessToken={auth.accessToken} />
+              </>
+            )}
+            {order.status === 'SHIPPED' && !isBuyer && auth.accessToken && (
+              <DeliveryCodeForm order={order} accessToken={auth.accessToken} />
             )}
             {order.status === 'DELIVERED' && <Notice tone="success">Delivered. This sale is complete.</Notice>}
             {order.status === 'CANCELLED' && (
@@ -273,6 +274,11 @@ export default function OrderDetailPage() {
           <Timeline order={order} />
         </div>
       </div>
+      {(order.status === 'SHIPPED' || order.status === 'DELIVERED') && (
+        <div className="mt-6">
+          <TrackingTimeline order={order} />
+        </div>
+      )}
     </main>
   );
 }

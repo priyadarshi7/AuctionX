@@ -11,13 +11,16 @@ export const payOrderSchema = z.object({
 
 export type PayOrderInput = z.infer<typeof payOrderSchema>;
 
-// Free-text on purpose: carriers are too many and too regional to enumerate
-// (this is a marketplace, not a shipping-API integration), and the server
-// doesn't act on the value. Trimmed and length-bounded so it can't be empty
-// or abused as a large-payload channel.
-export const shipOrderSchema = z.object({
-  carrier: z.string().trim().min(1, 'Enter the carrier').max(100),
-  trackingNumber: z.string().trim().min(1, 'Enter the tracking number').max(100),
+// The 6-digit delivery code the buyer was shown (ADR-0045).
+export const confirmDeliverySchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .regex(/^[0-9]{6}$/, 'Enter the 6-digit delivery code'),
 });
 
-export type ShipOrderInput = z.infer<typeof shipOrderSchema>;
+export type ConfirmDeliveryInput = z.infer<typeof confirmDeliverySchema>;
+
+// The shipping address is validated in the service against
+// shippingAddressSchema (address.ts); the route only needs an object.
+export const shippingAddressBodySchema = z.record(z.string(), z.unknown());

@@ -126,6 +126,12 @@ const envSchema = z.object({
   // the buyer-triggered payment sync still settles payments.
   STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
   STRIPE_CURRENCY: z.string().length(3).toLowerCase().default('usd'),
+  // Fulfilment (ADR-0045). A SHIPPED order nobody completed with the delivery
+  // code is auto-confirmed after this many days.
+  ORDER_AUTO_CONFIRM_DAYS: z.coerce.number().positive().default(7),
+  // The simulated courier advances a shipment one step (label -> in transit
+  // -> out for delivery) this often. Short by default so a demo is watchable.
+  SHIPPING_SIM_STEP_SECONDS: z.coerce.number().positive().default(30),
   // Redpanda locally (docker-compose.yml, ADR-0027) — Kafka-API-compatible,
   // so this is a real Kafka broker address either way. Same reasoning as
   // REDIS_URL/S3_ENDPOINT: the app must still boot and serve core traffic

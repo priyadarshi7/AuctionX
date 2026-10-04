@@ -362,6 +362,17 @@ model Order {
   cancelledAt    DateTime?
   cancelReason   OrderCancelReason?
 
+  // ADR-0045. Where to ship (a validated JSON object, see
+  // modules/orders/address.ts); the buyer must save it before paying. Never
+  // shown to anyone but the buyer and, while PAID/SHIPPED, the seller.
+  shippingAddress Json?
+  // The delivery code is derived (HMAC of orderId + version), never stored.
+  // Regenerating bumps the version; attempts caps wrong guesses per version.
+  deliveryOtpVersion  Int             @default(1)
+  deliveryOtpAttempts Int             @default(0)
+  deliveredVia        DeliveryMethod?
+  shipmentEvents      ShipmentEvent[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -373,6 +384,37 @@ model Order {
   // date". Same shape/reasoning as Auction's [status, endTime] index.
   @@index([status, paymentDueAt])
   @@map("orders")
+}
+
+// How an order reached DELIVERED (ADR-0045): the seller entered the buyer's
+// one-time code at handover, or nobody objected for ORDER_AUTO_CONFIRM_DAYS.
+enum DeliveryMethod {
+  OTP
+  AUTO
+}
+
+enum ShipmentEventType {
+  LABEL_CREATED
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+}
+
+// The tracking timeline of one order. Derived, append-only data: unique per
+// (order, type) so progressing a shipment is idempotent under retries and
+// several worker instances. Cascades with the order.
+model ShipmentEvent {
+  id          String            @id @default(uuid())
+  orderId     String
+  order       Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  type        ShipmentEventType
+  description String
+  location    String?
+  occurredAt  DateTime          @default(now())
+
+  @@unique([orderId, type])
+  @@index([orderId, occurredAt])
+  @@map("shipment_events")
 }
 
 enum PaymentStatus {

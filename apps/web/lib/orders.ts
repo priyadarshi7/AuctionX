@@ -1,20 +1,32 @@
 import { apiFetch } from './apiClient';
-import type { Order, Payment } from './types/order';
+import type { Order, Payment, ShippingAddress } from './types/order';
 
 export function listMyOrdersRequest(accessToken: string): Promise<{ orders: Order[] }> {
   return apiFetch<{ orders: Order[] }>('/orders', { accessToken });
 }
 
-export function shipOrderRequest(
-  accessToken: string,
-  orderId: string,
-  shipment: { carrier: string; trackingNumber: string },
-): Promise<{ order: Order }> {
-  return apiFetch<{ order: Order }>(`/orders/${orderId}/ship`, { method: 'POST', body: shipment, accessToken });
+// The carrier and tracking number are assigned by the server's shipping
+// provider (ADR-0045); the seller only says "it's shipped".
+export function shipOrderRequest(accessToken: string, orderId: string): Promise<{ order: Order }> {
+  return apiFetch<{ order: Order }>(`/orders/${orderId}/ship`, { method: 'POST', accessToken });
 }
 
-export function confirmDeliveryRequest(accessToken: string, orderId: string): Promise<{ order: Order }> {
-  return apiFetch<{ order: Order }>(`/orders/${orderId}/confirm-delivery`, { method: 'POST', accessToken });
+export function saveShippingAddressRequest(
+  accessToken: string,
+  orderId: string,
+  address: ShippingAddress,
+): Promise<{ order: Order }> {
+  return apiFetch<{ order: Order }>(`/orders/${orderId}/shipping-address`, { method: 'PUT', body: address, accessToken });
+}
+
+// SELLER, with the 6-digit code the buyer was shown.
+export function confirmDeliveryRequest(accessToken: string, orderId: string, code: string): Promise<{ order: Order }> {
+  return apiFetch<{ order: Order }>(`/orders/${orderId}/confirm-delivery`, { method: 'POST', body: { code }, accessToken });
+}
+
+// BUYER: a fresh code (also unlocks an order locked by wrong guesses).
+export function regenerateDeliveryCodeRequest(accessToken: string, orderId: string): Promise<{ order: Order }> {
+  return apiFetch<{ order: Order }>(`/orders/${orderId}/delivery-code/regenerate`, { method: 'POST', accessToken });
 }
 
 export function getOrderRequest(accessToken: string, orderId: string): Promise<{ order: Order }> {

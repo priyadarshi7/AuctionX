@@ -6,10 +6,12 @@ import {
   getOrderHandler,
   listOrdersHandler,
   payOrderHandler,
+  regenerateCodeHandler,
+  setShippingAddressHandler,
   shipOrderHandler,
   syncPaymentHandler,
 } from './controller';
-import { payOrderSchema, shipOrderSchema } from './schema';
+import { confirmDeliverySchema, payOrderSchema, shippingAddressBodySchema } from './schema';
 
 export const orderRoutes = Router();
 
@@ -18,7 +20,11 @@ export const orderRoutes = Router();
 // rule doesn't apply here; an order is never public).
 orderRoutes.get('/', authenticate, listOrdersHandler);
 orderRoutes.get('/:id', authenticate, getOrderHandler);
+orderRoutes.put('/:id/shipping-address', authenticate, validateBody(shippingAddressBodySchema), setShippingAddressHandler);
 orderRoutes.post('/:id/pay', authenticate, validateBody(payOrderSchema), payOrderHandler);
 orderRoutes.post('/:id/payment/sync', authenticate, syncPaymentHandler);
-orderRoutes.post('/:id/ship', authenticate, validateBody(shipOrderSchema), shipOrderHandler);
-orderRoutes.post('/:id/confirm-delivery', authenticate, confirmDeliveryHandler);
+orderRoutes.post('/:id/ship', authenticate, shipOrderHandler);
+// SELLER, with the buyer's one-time code (ADR-0045).
+orderRoutes.post('/:id/confirm-delivery', authenticate, validateBody(confirmDeliverySchema), confirmDeliveryHandler);
+// BUYER: a fresh code, which also unlocks an order locked by wrong guesses.
+orderRoutes.post('/:id/delivery-code/regenerate', authenticate, regenerateCodeHandler);

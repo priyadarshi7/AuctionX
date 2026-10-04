@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { createApp } from '../../src/app';
 import { env } from '../../src/config/env';
 import { prisma } from '../../src/infrastructure/database/prisma';
+import { TEST_ADDRESS } from '../helpers/address';
 import { runOnce } from '../../src/infrastructure/jobs/auctionClosingWorker';
 import { paymentProvider } from '../../src/infrastructure/payments';
 import type { PaymentProvider } from '../../src/infrastructure/payments';
@@ -81,7 +82,7 @@ async function createOrder(amountCents = 2000) {
   expect(bid.status).toBe(201);
   await prisma.auction.update({ where: { id: auctionId }, data: { endTime: new Date(Date.now() - 1_000) } });
   await runOnce();
-  const order = await prisma.order.findUniqueOrThrow({ where: { auctionId } });
+  const order = await prisma.order.update({ where: { auctionId }, data: { shippingAddress: TEST_ADDRESS } });
   return { seller, buyer, order };
 }
 

@@ -55,12 +55,12 @@ export function describeNotification(notification: Notification): { message: str
       };
     case 'ORDER_SHIPPED':
       return {
-        message: 'Your order has shipped. Confirm delivery when it arrives.',
+        message: 'Your order has shipped. Track it and find your delivery code on the order page.',
         href: `/orders/${notification.orderId}`,
       };
     case 'ORDER_DELIVERED':
       return {
-        message: 'The buyer confirmed delivery. This sale is complete.',
+        message: 'Delivery confirmed. This order is complete.',
         href: `/orders/${notification.orderId}`,
       };
     case 'AUCTION_MODERATED': {
