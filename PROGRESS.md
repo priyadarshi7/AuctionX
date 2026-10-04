@@ -180,9 +180,22 @@ DEPLOY-001 notes below are the history of getting there. Since then:
   `tests/notifications/notifications.test.ts` should run again; not yet
   re-verified.
 
-**Known open items (next session starts here):**
-- Playwright browser tests for bid/order/admin/review; the new UI has been
-  exercised by hand only.
+**State at hand-off (2026-10-04):** everything above is committed, pushed and
+live on Vercel + Render; production DB is migrated through
+`20261004160000_shipping_address_tracking_delivery_otp`. Render needs
+`STRIPE_SECRET_KEY` (sk_test_) and `STRIPE_WEBHOOK_SECRET` set by the developer
+(done or in progress; boot log says "Payments: Stripe TEST mode" when active).
+
+**Known open items (next session starts here), in suggested order:**
+1. Walk the whole post-auction flow once in a real browser on the deployed site
+   (win a 30s auction, save address, pay with 4242 4242 4242 4242, watch the
+   tracking timeline, enter the delivery code) and confirm Stripe's webhook
+   deliveries return 200. Only Stripe session create/read/expire were run live;
+   a completed payment and a refund of a paid session have not been.
+2. Playwright browser tests for bid/order/admin/review (CLAUDE.md Section 36);
+   all UI so far has been exercised by hand only.
+3. Disputes/returns (a buyer cannot contest an auto-confirmed delivery), and
+   seller payout / release of funds on delivery (not modelled).
 - Seller-initiated cancel of an auction that has bids does not notify bidders.
 - Review queue has an age indicator but no emails/escalation.
 - Documents: run a real clamd and switch `DOCUMENT_SCAN=clamav` (untested
