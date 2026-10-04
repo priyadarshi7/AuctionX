@@ -20,6 +20,32 @@ export function findPaymentByOrderAndIdempotencyKey(orderId: string, idempotency
   });
 }
 
+export function findPaymentById(id: string): Promise<Payment | null> {
+  return prisma.payment.findUnique({ where: { id } });
+}
+
+export function findPaymentByProviderRef(provider: string, providerRef: string): Promise<Payment | null> {
+  return prisma.payment.findUnique({ where: { provider_providerRef: { provider, providerRef } } });
+}
+
+// The newest still-undecided attempt for an order, for the buyer-triggered
+// reconciliation with the provider.
+export function findPendingPaymentForOrder(orderId: string): Promise<Payment | null> {
+  return prisma.payment.findFirst({ where: { orderId, status: 'PENDING' }, orderBy: { createdAt: 'desc' } });
+}
+
+// Guarded: only a SUCCEEDED payment that has not been refunded yet can be
+// marked refunded, so two concurrent refunds (an automatic one and an admin
+// retry) cannot both record a result. The provider call itself is idempotent
+// per payment (refund-{paymentId}), so the money is returned at most once.
+export async function markPaymentRefunded(paymentId: string, refundRef: string): Promise<boolean> {
+  const { count } = await prisma.payment.updateMany({
+    where: { id: paymentId, status: 'SUCCEEDED', refundedAt: null },
+    data: { refundedAt: new Date(), refundRef },
+  });
+  return count === 1;
+}
+
 export type NewPaymentAttempt = {
   orderId: string;
   provider: string;
@@ -34,7 +60,10 @@ export function createPaymentAttempt(data: NewPaymentAttempt): Promise<Payment> 
 
 type LockedPaymentRow = { id: string; orderId: string; status: PaymentStatus };
 
-export type ApplyWebhookResult = { applied: boolean };
+// refundPaymentId is set when the provider really took the money but the
+// order could no longer be paid (it had been cancelled), so the caller can
+// return the money.
+export type ApplyWebhookResult = { applied: boolean; refundPaymentId?: string };
 
 // One transaction: lock the Payment row by (provider, providerRef) — the
 // exact pair a webhook uses to find its way back here — verify it's still
@@ -80,9 +109,9 @@ export async function applyPaymentWebhookEvent(
       if (count === 0) {
         logger.error(
           { orderId: payment.orderId, paymentId: payment.id },
-          'payment.succeeded_for_non_payable_order: money taken for an order that is no longer awaiting payment; needs a manual refund',
+          'payment.succeeded_for_non_payable_order: money taken for an order that is no longer awaiting payment; refunding',
         );
-        return { applied: true };
+        return { applied: true, refundPaymentId: payment.id };
       }
       const updatedOrder = await tx.order.findUniqueOrThrow({ where: { id: payment.orderId } });
       // Published via the Outbox (ADR-0027) — a consumer

@@ -149,20 +149,35 @@ DEPLOY-001 notes below are the history of getting there. Since then:
   snapshot for the idempotency join and the previous-top-bid lookup (the
   earlier "timing-sensitive" test flake); previous top bid is now computed in
   the write statement and bid createdAt uses clock_timestamp().
-- Tests: 267 backend tests pass under `jest --runInBand` (web typecheck and
+- **DOCS-001 (ADR-0043):** uploaded documents are scanned at registration
+  (built-in type/active-content/EICAR checks always; ClamAV via clamd opt-in with
+  `DOCUMENT_SCAN=clamav`, fails closed; production has no clamd so it runs
+  `basic`). Account deletion removes the user's document files; a 6-hourly
+  sweeper deletes unreferenced objects older than 24h.
+- **PAY-001 (ADR-0044):** real Stripe (Checkout, TEST MODE ONLY) behind the
+  existing provider seam; webhook at `/api/v1/webhooks/payments/stripe`;
+  buyer-triggered payment sync; amount tripwire; automatic refunds for money
+  that lands on a cancelled order + admin "Refund" retry; migration
+  `20261004120000_payment_refund_tracking`. The API refuses to boot with a
+  non-test Stripe key; site-wide "demo, no real money" banner. Provider = Stripe
+  when `STRIPE_SECRET_KEY` is set, else mock.
+  **Deploy checklist:** (1) apply the migration to production, (2) set
+  `STRIPE_SECRET_KEY` (sk_test_) on Render, (3) in Stripe (test mode) add the
+  webhook endpoint and set `STRIPE_WEBHOOK_SECRET`, (4) push/deploy.
+  The Stripe SDK calls have not yet been run against Stripe itself.
+- Tests: 296 backend tests pass under `jest --runInBand` (web typecheck and
   lint clean). Local Redpanda now advertises `127.0.0.1:9092` (recreate the
   container: `docker compose up -d --force-recreate redpanda`) so
   `tests/notifications/notifications.test.ts` should run again; not yet
   re-verified.
 
 **Known open items (next session starts here):**
-- Real Stripe (test mode) to replace the mock provider, with webhooks and
-  automatic refunds (refunds are manual today; the dashboard flags them).
 - Playwright browser tests for bid/order/admin/review; the new UI has been
   exercised by hand only.
 - Seller-initiated cancel of an auction that has bids does not notify bidders.
 - Review queue has an age indicator but no emails/escalation.
-- Documents: orphaned objects after account deletion, no virus scan.
+- Documents: run a real clamd and switch `DOCUMENT_SCAN=clamav` (untested
+  against a live daemon); the sweeper's batch delete is untested on Supabase.
 - Delete the old Oregon Render service (your account, not automatable).
 - Windows gotcha: Prisma `generate` fails with EPERM while `npm run dev` is
   running (types still update; stop the server only if the engine file itself

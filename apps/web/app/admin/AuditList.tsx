@@ -10,6 +10,7 @@ const ACTION_LABEL: Record<string, string> = {
   'auction.approve': 'Approved listing',
   'auction.reject': 'Sent listing back to seller',
   'user.trusted_changed': 'Changed trusted-seller status',
+  'order.refund': 'Refunded an order',
 };
 
 function targetHref(entry: AuditEntry): string | null {

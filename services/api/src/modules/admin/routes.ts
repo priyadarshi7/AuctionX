@@ -8,6 +8,7 @@ import {
   listOrdersHandler,
   listUsersHandler,
   moderateAuctionHandler,
+  refundOrderHandler,
   setTrustedSellerHandler,
   statsHandler,
   updateUserStatusHandler,
@@ -40,5 +41,6 @@ adminRoutes.get('/auctions', validateQuery(listAdminAuctionsQuerySchema), listAu
 adminRoutes.post('/auctions/:auctionId/moderate', validateBody(moderateAuctionSchema), moderateAuctionHandler);
 
 adminRoutes.get('/orders', validateQuery(listAdminOrdersQuerySchema), listOrdersHandler);
+adminRoutes.post('/orders/:orderId/refund', refundOrderHandler);
 
 adminRoutes.get('/audit-log', validateQuery(listAuditLogQuerySchema), listAuditLogHandler);

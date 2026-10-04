@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { deleteDocumentObjects } from '../../infrastructure/storage/documents';
+import { listObjectKeysForSeller } from '../documents/repository';
 import { Prisma, type Role, type User, type UserStatus } from '@prisma/client';
 import { env } from '../../config/env';
 import { emailSender } from '../../infrastructure/email/sender';
@@ -214,7 +216,12 @@ export async function deleteOwnAccount(userId: string): Promise<void> {
         'permanent records and can never be removed.',
     );
   }
+  // Collect the seller's document files first: the cascade deletes the rows
+  // that say which files exist. The objects are removed only after the
+  // database delete commits (best effort; the orphan sweeper is the backstop).
+  const documentKeys = await listObjectKeysForSeller(userId);
   await deleteUserAndOwnedAuctions(userId);
+  await deleteDocumentObjects(documentKeys);
 }
 
 export async function refreshTokens(

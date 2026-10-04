@@ -1,10 +1,11 @@
 'use client';
 
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
-import { listOrdersAdminRequest } from '@/lib/admin';
+import { listOrdersAdminRequest, refundOrderRequest } from '@/lib/admin';
+import { ApiError } from '@/lib/apiClient';
 import { formatCents } from '@/lib/format';
 import type { OrderStatus } from '@/lib/types/order';
 import { useAuthStore } from '@/store/authStore';
@@ -15,6 +16,23 @@ import { PageHeader, PageMessage, Skeleton } from '../../components/ui/Page';
 import { OrderStatusPill } from '../../components/ui/StatusPill';
 
 const STATUSES: OrderStatus[] = ['PENDING_PAYMENT', 'PAID', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
+
+function RefundButton({ orderId, accessToken }: { orderId: string; accessToken: string }) {
+  const queryClient = useQueryClient();
+  const refund = useMutation({
+    mutationFn: () => refundOrderRequest(accessToken, orderId),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['admin'] }),
+  });
+  const error = refund.error instanceof ApiError ? refund.error.message : refund.error ? 'Refund failed.' : null;
+  return (
+    <span className="flex flex-col items-end gap-1">
+      <Button size="sm" variant="danger" disabled={refund.isPending} onClick={() => refund.mutate()}>
+        {refund.isPending ? 'Refunding…' : 'Refund'}
+      </Button>
+      {error && <span className="text-xs font-medium">{error}</span>}
+    </span>
+  );
+}
 
 function OrdersList() {
   const accessToken = useAuthStore((s) => s.accessToken)!;
@@ -58,8 +76,8 @@ function OrdersList() {
       {needsRefund && (
         <div className="mb-5">
           <Notice tone="info">
-            These orders were cancelled after the buyer’s payment succeeded. Refunds are not automatic yet: return the
-            money through your payment provider, then note it in the audit trail.
+            These orders were cancelled after the buyer’s payment succeeded. The system tries to refund them
+            automatically; any that appear here are ones where that attempt failed. Use Refund to retry.
           </Notice>
         </div>
       )}
@@ -95,7 +113,10 @@ function OrdersList() {
               </div>
               <div className="flex items-center gap-3">
                 {order.needsRefund && (
-                  <span className="rounded-full border-2 border-line bg-pink px-2.5 py-0.5 text-xs font-bold">Needs refund</span>
+                  <>
+                    <span className="rounded-full border-2 border-line bg-pink px-2.5 py-0.5 text-xs font-bold">Needs refund</span>
+                    <RefundButton orderId={order.id} accessToken={accessToken} />
+                  </>
                 )}
                 <OrderStatusPill status={order.status} />
                 <p className="font-display text-lg font-extrabold">{formatCents(order.amountCents)}</p>

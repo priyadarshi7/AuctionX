@@ -1,6 +1,6 @@
-import type { Order, Payment } from '@prisma/client';
+import type { Order } from '@prisma/client';
 import { ConflictError, ForbiddenError, NotFoundError } from '../../middleware/errors';
-import { createPaymentIntentForOrder } from '../payments/service';
+import { createPaymentIntentForOrder, syncOrderPayment, type PaymentStart } from '../payments/service';
 import {
   findOrderById,
   listOrdersForUser,
@@ -33,8 +33,14 @@ export async function getOrderForViewer(userId: string, orderId: string): Promis
 // The buyer-ownership and order-state checks live in
 // createPaymentIntentForOrder itself, since payments/service.ts already
 // has to load the Order row to do its own work.
-export function payForOrder(buyerId: string, orderId: string, idempotencyKey: string): Promise<Payment> {
+export function payForOrder(buyerId: string, orderId: string, idempotencyKey: string): Promise<PaymentStart> {
   return createPaymentIntentForOrder(buyerId, orderId, idempotencyKey);
+}
+
+// The buyer asks us to check with the payment provider rather than wait for
+// its webhook (ADR-0044). Idempotent and safe to call repeatedly.
+export function syncPayment(buyerId: string, orderId: string): Promise<void> {
+  return syncOrderPayment(buyerId, orderId);
 }
 
 // Seller marks a PAID order as shipped. Idempotent for the exact same

@@ -5,6 +5,7 @@ import {
   listAuctionsAsAdmin,
   listAuditLogForAdmin,
   listOrdersAsAdmin,
+  refundOrderAsAdmin,
   listUsersForAdmin,
   moderateAuctionAsAdmin,
   setTrustedSellerAsAdmin,
@@ -97,6 +98,15 @@ export async function listOrdersHandler(req: Request, res: Response, next: NextF
       cursor,
     );
     res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function refundOrderHandler(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    await refundOrderAsAdmin(req.user!.id, req.params.orderId as string);
+    res.status(200).json({ refunded: true });
   } catch (err) {
     next(err);
   }

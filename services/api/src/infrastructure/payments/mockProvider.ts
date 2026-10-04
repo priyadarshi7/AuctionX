@@ -3,6 +3,7 @@ import { env } from '../../config/env';
 import { logger } from '../observability/logger';
 import type {
   PaymentProvider,
+  PaymentStatusSnapshot,
   PaymentWebhookEvent,
   CreatePaymentIntentInput,
   CreatePaymentIntentResult,
@@ -44,6 +45,7 @@ export type WebhookHandler = (rawBody: Buffer, signatureHeader: string | undefin
 // deterministic without binding a second real listener.
 export class MockPaymentProvider implements PaymentProvider {
   readonly name = 'mock';
+  readonly signatureHeader = 'x-mock-signature';
   private webhookHandler: WebhookHandler | null = null;
   // Real providers (Stripe included) dedupe on an Idempotency-Key you pass
   // THEM, not just on a key you separately store yourself — a retried
@@ -72,7 +74,7 @@ export class MockPaymentProvider implements PaymentProvider {
     }
 
     const providerRef = `mock_pi_${randomUUID()}`;
-    const result: CreatePaymentIntentResult = { providerRef, status: 'PENDING' };
+    const result: CreatePaymentIntentResult = { providerRef, status: 'PENDING', checkoutUrl: null };
     this.intentsByIdempotencyKey.set(input.idempotencyKey, result);
 
     setTimeout(() => {
@@ -114,6 +116,16 @@ export class MockPaymentProvider implements PaymentProvider {
       throw new Error('Unrecognized webhook payload shape');
     }
     return { type: parsed.type, providerRef: parsed.providerRef };
+  }
+
+  // The mock settles by itself via its simulated webhook, so from the
+  // outside it is always "open" until that webhook lands.
+  fetchStatus(_providerRef: string): Promise<PaymentStatusSnapshot> {
+    return Promise.resolve({ state: 'open', checkoutUrl: null });
+  }
+
+  refund(_providerRef: string, _idempotencyKey: string): Promise<{ refundRef: string }> {
+    return Promise.resolve({ refundRef: `mock_re_${randomUUID()}` });
   }
 
   private async simulateWebhookDelivery(event: PaymentWebhookEvent): Promise<void> {

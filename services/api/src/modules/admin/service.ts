@@ -2,10 +2,12 @@ import type { AdminAuditLog, Auction, AuctionStatus, Order, OrderStatus, Role, U
 import { notifyAuctionChanged } from '../../infrastructure/realtime/auctionEvents';
 import { clearUserBlocked, markUserBlocked } from '../../infrastructure/security/blockedUsers';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../middleware/errors';
+import { refundPayment } from '../payments/service';
 import {
   changeTrustedSeller,
   changeUserStatus,
   findAuctionStatus,
+  findOrderWithPayments,
   findUser,
   getPlatformStats,
   listAuctionsForAdmin,
@@ -13,6 +15,7 @@ import {
   listOrdersForAdmin,
   listUsers,
   moderateAuctionRow,
+  writeAuditEntry,
   type AdminAuctionRow,
   type AdminOrderRow,
   type AuditLogFilters,
@@ -228,8 +231,29 @@ function toAdminOrderView(row: AdminOrderRow): AdminOrderView {
     ...order,
     buyerEmail: buyer.email,
     sellerEmail: seller.email,
-    needsRefund: order.status === 'CANCELLED' && payments.some((p) => p.status === 'SUCCEEDED'),
+    needsRefund: order.status === 'CANCELLED' && payments.some((p) => p.status === 'SUCCEEDED' && !p.refundedAt),
   };
+}
+
+// Retry for the rare case the automatic refund failed (the payment provider
+// was down). Only a CANCELLED order with an unrefunded successful payment
+// qualifies. The refund itself is idempotent at the provider, so a double
+// click cannot refund twice.
+export async function refundOrderAsAdmin(actorId: string, orderId: string): Promise<void> {
+  const order = await findOrderWithPayments(orderId);
+  if (!order) throw new NotFoundError('Order not found');
+  const payment = order.status === 'CANCELLED' ? order.payments.find((p) => p.status === 'SUCCEEDED' && !p.refundedAt) : undefined;
+  if (!payment) {
+    throw new ConflictError('NOTHING_TO_REFUND', 'This order has no unrefunded payment on a cancelled order');
+  }
+  await refundPayment(payment.id);
+  await writeAuditEntry({
+    actorId,
+    action: 'order.refund',
+    targetType: 'order',
+    targetId: orderId,
+    metadata: { paymentId: payment.id },
+  });
 }
 
 export async function listOrdersAsAdmin(

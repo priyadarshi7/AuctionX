@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  DeleteObjectsCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
+} from '@aws-sdk/client-s3';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { env } from '../../config/env';
@@ -85,6 +91,50 @@ export function createSignedDocumentUrl(objectKey: string, fileName: string): Pr
     }),
     { expiresIn: SIGNED_DOWNLOAD_EXPIRY_SECONDS },
   );
+}
+
+// The object's bytes, for scanning. Bounded by MAX_DOCUMENT_BYTES, which
+// registration has already verified against the real size.
+export async function readDocumentObject(objectKey: string): Promise<Buffer> {
+  const res = await s3Client.send(new GetObjectCommand({ Bucket: env.S3_DOCS_BUCKET, Key: objectKey }));
+  return Buffer.from(await res.Body!.transformToByteArray());
+}
+
+export async function listDocumentObjects(
+  continuationToken?: string,
+): Promise<{ objects: { key: string; lastModified: Date | undefined }[]; nextToken: string | undefined }> {
+  const res = await s3Client.send(
+    new ListObjectsV2Command({
+      Bucket: env.S3_DOCS_BUCKET,
+      Prefix: 'documents/',
+      ...(continuationToken ? { ContinuationToken: continuationToken } : {}),
+    }),
+  );
+  return {
+    objects: (res.Contents ?? []).flatMap((o) => (o.Key ? [{ key: o.Key, lastModified: o.LastModified }] : [])),
+    nextToken: res.IsTruncated ? res.NextContinuationToken : undefined,
+  };
+}
+
+// Best effort, batched (S3 allows 1000 keys per request). Returns how many
+// were deleted; a failed batch is logged and left for the orphan sweeper.
+export async function deleteDocumentObjects(objectKeys: string[]): Promise<number> {
+  let deleted = 0;
+  for (let i = 0; i < objectKeys.length; i += 1000) {
+    const batch = objectKeys.slice(i, i + 1000);
+    try {
+      const res = await s3Client.send(
+        new DeleteObjectsCommand({
+          Bucket: env.S3_DOCS_BUCKET,
+          Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
+        }),
+      );
+      deleted += batch.length - (res.Errors?.length ?? 0);
+    } catch (err) {
+      logger.warn({ err, count: batch.length }, 'storage.document_batch_delete_failed');
+    }
+  }
+  return deleted;
 }
 
 // Best effort: a failed object delete leaves an orphan file in a private

@@ -22,14 +22,27 @@ import { ensureAuctionIndex } from './modules/search/repository';
 import { reindexAllAuctions } from './modules/search/service';
 import { startAiValuationConsumer, stopAiValuationConsumer } from './modules/ai/consumer';
 
+import { paymentProvider } from './infrastructure/payments';
+import { startDocumentOrphanSweeper, stopDocumentOrphanSweeper } from './infrastructure/jobs/documentOrphanSweeper';
+
 const app = createApp();
 
 const server = app.listen(env.PORT, () => {
   logger.info({ port: env.PORT, env: env.NODE_ENV }, 'API server listening');
 });
 
+// State the payment mode at every boot so a misconfiguration is visible in the
+// first lines of the log. (A live Stripe key never gets this far: env.ts exits.)
+logger.info(
+  { paymentProvider: paymentProvider.name, stripeTestMode: Boolean(env.STRIPE_SECRET_KEY) },
+  env.STRIPE_SECRET_KEY ? 'Payments: Stripe TEST mode (no real money)' : 'Payments: in-process mock provider',
+);
+if (env.STRIPE_SECRET_KEY && !env.STRIPE_WEBHOOK_SECRET) {
+  logger.warn('STRIPE_WEBHOOK_SECRET is not set: Stripe webhooks will be rejected; payments settle via the buyer-triggered sync only');
+}
 startAuctionClosingWorker();
 startOrderPaymentDeadlineWorker();
+startDocumentOrphanSweeper();
 // Attached to the SAME http.Server app.listen() returned, not a second
 // port — see gateway.ts's module comment for why this is one process today.
 startWebSocketGateway(server);
@@ -94,6 +107,7 @@ function shutdown(signal: string): void {
   logger.info({ signal }, 'Shutting down gracefully');
   stopAuctionClosingWorker();
   stopOrderPaymentDeadlineWorker();
+  stopDocumentOrphanSweeper();
   stopOutboxPublisherWorker();
   stopWebSocketGateway();
   void stopNotificationsConsumer().catch((err: unknown) => {

@@ -8,6 +8,17 @@ export function countDocumentsForAuction(auctionId: string): Promise<number> {
   return prisma.auctionDocument.count({ where: { auctionId } });
 }
 
+// Every stored object key belonging to a seller's auctions, collected BEFORE
+// the account's rows are deleted (the cascade removes the rows, after which
+// there would be nothing left to say which files to remove).
+export async function listObjectKeysForSeller(sellerId: string): Promise<string[]> {
+  const rows = await prisma.auctionDocument.findMany({
+    where: { auction: { sellerId } },
+    select: { objectKey: true },
+  });
+  return rows.map((r) => r.objectKey);
+}
+
 export function listDocumentsForAuction(auctionId: string): Promise<AuctionDocument[]> {
   return prisma.auctionDocument.findMany({ where: { auctionId }, orderBy: { createdAt: 'asc' } });
 }

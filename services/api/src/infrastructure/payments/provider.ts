@@ -2,8 +2,9 @@
 // interface is the seam between that flow and any specific provider — the
 // same pattern as infrastructure/email/sender.ts's EmailSender: business
 // logic (modules/payments, modules/orders) depends only on this interface,
-// never on a concrete provider, so swapping Mock for a real Stripe/Razorpay
-// implementation later touches one file, not every caller.
+// never on a concrete provider. Two implementations exist: MockPaymentProvider
+// (local dev and tests) and StripePaymentProvider (Stripe Checkout, test mode
+// only — see stripeProvider.ts and ADR-0044).
 
 export type CreatePaymentIntentInput = {
   orderId: string;
@@ -14,6 +15,10 @@ export type CreatePaymentIntentInput = {
   // Idempotency-Key precisely so a network retry of this same call can't
   // create two intents for one order.
   idempotencyKey: string;
+  // What the buyer sees on the provider's page.
+  description: string;
+  // Where the provider sends the buyer back to (the order page).
+  returnUrl: string;
 };
 
 export type CreatePaymentIntentResult = {
@@ -21,26 +26,39 @@ export type CreatePaymentIntentResult = {
   // stored so an incoming webhook can be correlated back to this Payment.
   providerRef: string;
   status: 'PENDING';
+  // Hosted-checkout providers: where to send the buyer to pay. Null for the
+  // mock, which "pays" by itself.
+  checkoutUrl: string | null;
 };
 
-// Deliberately just {type, providerRef} — NEVER an amount. Section 19: never
-// trust a client-or-provider-supplied claim about money against anything
-// but our own records. The only thing a webhook is allowed to tell us is
-// "this providerRef changed state"; the amount that actually gets marked
-// paid always comes from the Payment row we ourselves created, not from
-// whatever a webhook payload claims.
+// A webhook may only tell us that a providerRef changed state. The amount
+// that gets marked paid always comes from the Payment row we created. An
+// event MAY carry the amount the provider actually collected, and if it does
+// it is used only as a tripwire: a mismatch with our own record means the
+// payment is NOT applied and is logged loudly (Section 19).
 export type PaymentWebhookEvent =
-  | { type: 'payment.succeeded'; providerRef: string }
+  | { type: 'payment.succeeded'; providerRef: string; amountCents?: number }
   | { type: 'payment.failed'; providerRef: string };
+
+// The provider's current view of one payment, asked directly rather than
+// waited for. Used to reconcile when a webhook is late or missing.
+export type PaymentStatusSnapshot =
+  | { state: 'paid'; amountCents: number }
+  | { state: 'open'; checkoutUrl: string | null }
+  | { state: 'expired' };
 
 export interface PaymentProvider {
   readonly name: string;
+  // The HTTP header carrying the webhook signature for this provider.
+  readonly signatureHeader: string;
   createPaymentIntent(input: CreatePaymentIntentInput): Promise<CreatePaymentIntentResult>;
   // Throws on a missing/invalid signature or unparseable body — callers
-  // never get a PaymentWebhookEvent out of this without it being verified
-  // first. rawBody must be the exact bytes the provider signed (Section 28
-  // — signature verification breaks if the body is re-serialized from
-  // parsed JSON first), which is why the webhook route must NOT run
-  // express.json() ahead of this call.
-  verifyWebhookEvent(rawBody: Buffer, signatureHeader: string | undefined): PaymentWebhookEvent;
+  // never get an event out of this without it being verified first.
+  // Returns null for a verified event we deliberately do not act on.
+  // rawBody must be the exact bytes the provider signed (Section 28), which is
+  // why the webhook route must NOT run express.json() ahead of this call.
+  verifyWebhookEvent(rawBody: Buffer, signatureHeader: string | undefined): PaymentWebhookEvent | null;
+  fetchStatus(providerRef: string): Promise<PaymentStatusSnapshot>;
+  // Returns the provider's id for the refund. Idempotent per idempotencyKey.
+  refund(providerRef: string, idempotencyKey: string): Promise<{ refundRef: string }>;
 }

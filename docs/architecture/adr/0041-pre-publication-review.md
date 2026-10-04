@@ -106,7 +106,9 @@ are untouched.
 - Risk signals beyond category and trust: seller account age, starting price,
   AI valuation outliers, fraud scores (CLAUDE.md Section 21).
 - Notify bidders when an admin cancels an auction that has bids.
-- Virus scanning for uploaded documents.
+- ~~Virus scanning for uploaded documents.~~ Done in ADR-0043 (built-in
+  checks always; ClamAV opt-in). Orphaned files after account deletion are also
+  cleaned up there.
 - Re-review when a live listing is materially edited (editing live listings is
   not allowed today).
 - If `AUCTION_REVIEW_MODE` is ever needed per environment at runtime without a

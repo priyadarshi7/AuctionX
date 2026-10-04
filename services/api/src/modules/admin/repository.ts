@@ -311,10 +311,24 @@ export function findAuctionStatus(id: string): Promise<{ status: AuctionStatus; 
 // Orders
 // ---------------------------------------------------------------------------
 
+// Audit entry written on its own (the refund's money movement happens at the
+// payment provider, outside any database transaction we could join).
+export function writeAuditEntry(entry: NewAuditEntry): Promise<AdminAuditLog> {
+  const { reason, ...rest } = entry;
+  return prisma.adminAuditLog.create({ data: { ...rest, ...(reason ? { reason } : {}) } });
+}
+
+export function findOrderWithPayments(orderId: string) {
+  return prisma.order.findUnique({
+    where: { id: orderId },
+    select: { id: true, status: true, payments: { select: { id: true, status: true, refundedAt: true } } },
+  });
+}
+
 export type AdminOrderRow = Order & {
   buyer: { email: string };
   seller: { email: string };
-  payments: { status: PaymentStatus }[];
+  payments: { id: string; status: PaymentStatus; refundedAt: Date | null }[];
 };
 
 // "Needs a refund": the buyer's payment really succeeded but the order is
@@ -322,7 +336,7 @@ export type AdminOrderRow = Order & {
 // The money moved and nothing automatic will return it.
 const NEEDS_REFUND_WHERE: Prisma.OrderWhereInput = {
   status: 'CANCELLED',
-  payments: { some: { status: 'SUCCEEDED' } },
+  payments: { some: { status: 'SUCCEEDED', refundedAt: null } },
 };
 
 export async function listOrdersForAdmin(
@@ -340,7 +354,7 @@ export async function listOrdersForAdmin(
     include: {
       buyer: { select: { email: true } },
       seller: { select: { email: true } },
-      payments: { select: { status: true } },
+      payments: { select: { id: true, status: true, refundedAt: true } },
     },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: limit + 1,

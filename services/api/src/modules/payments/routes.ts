@@ -9,3 +9,7 @@ export const paymentWebhookRoutes = Router();
 // '*/*'` because a webhook's Content-Type is the provider's choice, not
 // something we should filter on before we've even verified the signature.
 paymentWebhookRoutes.post('/mock', raw({ type: '*/*' }), paymentWebhookHandler);
+// Stripe's endpoint (register this URL in the Stripe dashboard). Both paths
+// run the same handler: the ACTIVE provider decides how the signature is
+// verified, so a mock-signed request to /stripe (or vice versa) is rejected.
+paymentWebhookRoutes.post('/stripe', raw({ type: '*/*' }), paymentWebhookHandler);

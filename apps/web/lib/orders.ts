@@ -26,10 +26,22 @@ export function getOrderRequest(accessToken: string, orderId: string): Promise<{
 // the SAME attempt (e.g. a disabled-button double-click racing the network)
 // should reuse it; a genuinely fresh attempt (page reload, retry after a
 // failed payment) should generate a new one. See app/orders/[id]/page.tsx.
-export function payOrderRequest(accessToken: string, orderId: string, idempotencyKey: string): Promise<{ payment: Payment }> {
-  return apiFetch<{ payment: Payment }>(`/orders/${orderId}/pay`, {
+// checkoutUrl is the payment provider's hosted page (Stripe Checkout); null
+// when the provider settles by itself (the local mock).
+export function payOrderRequest(
+  accessToken: string,
+  orderId: string,
+  idempotencyKey: string,
+): Promise<{ payment: Payment; checkoutUrl: string | null }> {
+  return apiFetch<{ payment: Payment; checkoutUrl: string | null }>(`/orders/${orderId}/pay`, {
     method: 'POST',
     body: { idempotencyKey },
     accessToken,
   });
+}
+
+// Asks the server to check with the payment provider instead of waiting for
+// its webhook. Safe to call repeatedly.
+export function syncPaymentRequest(accessToken: string, orderId: string): Promise<{ synced: boolean }> {
+  return apiFetch<{ synced: boolean }>(`/orders/${orderId}/payment/sync`, { method: 'POST', accessToken });
 }

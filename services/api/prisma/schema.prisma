@@ -426,6 +426,11 @@ model Payment {
 
   idempotencyKey String
 
+  // Set when the money was returned to the buyer (ADR-0044). A SUCCEEDED
+  // payment on a CANCELLED order with refundedAt null is a "needs refund".
+  refundedAt DateTime?
+  refundRef  String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

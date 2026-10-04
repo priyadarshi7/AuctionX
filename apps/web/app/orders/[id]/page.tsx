@@ -2,10 +2,10 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import { useRef } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
+import { useEffect, useRef } from 'react';
 import { ApiError } from '@/lib/apiClient';
-import { confirmDeliveryRequest, getOrderRequest, payOrderRequest } from '@/lib/orders';
+import { confirmDeliveryRequest, getOrderRequest, payOrderRequest, syncPaymentRequest } from '@/lib/orders';
 import { formatCents } from '@/lib/format';
 import { useRequireAuth } from '@/lib/useRequireAuth';
 import type { Order } from '@/lib/types/order';
@@ -121,10 +121,45 @@ export default function OrderDetailPage() {
 
   const pay = useMutation({
     mutationFn: () => payOrderRequest(auth.accessToken!, orderId, idempotencyKeyRef.current),
+    onSuccess: (data) => {
+      if (data.checkoutUrl) {
+        // Hand the buyer to the provider's hosted page. We never see card details.
+        window.location.assign(data.checkoutUrl);
+        return;
+      }
+      void queryClient.invalidateQueries({ queryKey: ['orders', orderId] });
+    },
+  });
+
+  // Coming back from the payment page (?payment=success|cancelled). The
+  // provider's webhook normally settles the order within seconds, but a late
+  // or missing webhook must not leave a paid order looking unpaid, so while
+  // it is still pending we ask the server to check with the provider directly.
+  const returned = useSearchParams().get('payment');
+  const orderPending = orderQuery.data?.order.status === 'PENDING_PAYMENT';
+  const { mutate: syncPayment } = useMutation({
+    mutationFn: () => syncPaymentRequest(auth.accessToken!, orderId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['orders', orderId] });
     },
   });
+  useEffect(() => {
+    if (returned !== 'success' || !orderPending || !auth.accessToken) return;
+    syncPayment();
+    const timer = setInterval(() => syncPayment(), 3000);
+    return () => clearInterval(timer);
+  }, [returned, orderPending, auth.accessToken, syncPayment]);
+
+  // Browser Back from the provider's page can restore this page from cache
+  // with the button stuck in its "redirecting" state.
+  const { reset: resetPay } = pay;
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) resetPay();
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, [resetPay]);
 
   if (!auth.ready || orderQuery.isLoading) {
     return <PageLoading />;
@@ -145,6 +180,7 @@ export default function OrderDetailPage() {
 
   const order: Order = orderQuery.data.order;
   const isBuyer = order.buyerId === auth.user.id;
+  const redirecting = pay.isSuccess && Boolean(pay.data.checkoutUrl);
   const paying = pay.isPending || pay.isSuccess;
   const confirmError =
     confirmDelivery.error instanceof ApiError ? confirmDelivery.error.message : confirmDelivery.error ? 'Something went wrong.' : null;
@@ -172,10 +208,22 @@ export default function OrderDetailPage() {
             {isBuyer && order.status === 'PENDING_PAYMENT' && (
               <>
                 <Button onClick={() => pay.mutate()} disabled={paying} className="w-full">
-                  {paying ? 'Processing…' : `Pay ${formatCents(order.amountCents)}`}
+                  {redirecting ? 'Taking you to secure payment…' : paying ? 'Processing…' : `Pay ${formatCents(order.amountCents)}`}
                 </Button>
                 {payError && <Notice tone="error">{payError}</Notice>}
-                {paying && !payError && <Notice tone="info">Confirming your payment. This usually takes a moment.</Notice>}
+                {returned === 'cancelled' && !paying && (
+                  <Notice tone="info">Payment was cancelled. Nothing was charged. You can try again.</Notice>
+                )}
+                {returned === 'success' && (
+                  <Notice tone="info">Payment submitted. Confirming it with the payment provider…</Notice>
+                )}
+                {paying && !redirecting && !payError && (
+                  <Notice tone="info">Confirming your payment. This usually takes a moment.</Notice>
+                )}
+                <p className="text-xs text-ink/60">
+                  Demo project: payments run in test mode and no real money moves. On the payment page use card{' '}
+                  <strong>4242 4242 4242 4242</strong>, any future expiry date and any 3-digit CVC.
+                </p>
               </>
             )}
             {!isBuyer && order.status === 'PENDING_PAYMENT' && (

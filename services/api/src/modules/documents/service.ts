@@ -6,9 +6,10 @@ import {
   documentKeyPrefix,
   headDocumentObject,
   MAX_DOCUMENT_BYTES,
+  readDocumentObject,
   type DocumentContentType,
 } from '../../infrastructure/storage/documents';
-import { ConflictError, NotFoundError, ValidationError } from '../../middleware/errors';
+import { AppError, ConflictError, NotFoundError, ValidationError } from '../../middleware/errors';
 import { findAuctionById } from '../auctions/repository';
 import {
   countDocumentsForAuction,
@@ -18,6 +19,8 @@ import {
   listDocumentsForAuction,
 } from './repository';
 import type { RegisterDocumentInput } from './schema';
+import { ClamavUnavailableError } from '../../infrastructure/security/clamav';
+import { scanDocument } from '../../infrastructure/storage/documentScan';
 
 // Enforced exactly at registration (createDocumentWithinLimit locks the
 // auction row); the earlier checks only fail fast before an upload.
@@ -91,6 +94,23 @@ export async function registerDocument(
   if (head.sizeBytes > MAX_DOCUMENT_BYTES) {
     await deleteDocumentObject(input.objectKey);
     throw new ValidationError({ objectKey: ['File is too large'] });
+  }
+
+  // Scan what is really in the bucket before it can ever be shown to an
+  // admin. A refused file is deleted. If the scanner itself is down we do NOT
+  // delete or accept: the seller retries (fail closed, ADR-0043).
+  let verdict;
+  try {
+    verdict = await scanDocument(await readDocumentObject(input.objectKey), head.contentType ?? input.contentType);
+  } catch (err) {
+    if (err instanceof ClamavUnavailableError) {
+      throw new AppError(503, 'SCAN_UNAVAILABLE', 'We could not scan this file right now. Please try again shortly.');
+    }
+    throw err;
+  }
+  if (!verdict.ok) {
+    await deleteDocumentObject(input.objectKey);
+    throw new ValidationError({ objectKey: [verdict.reason] }, 'This file was rejected');
   }
 
   try {

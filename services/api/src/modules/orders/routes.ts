@@ -7,6 +7,7 @@ import {
   listOrdersHandler,
   payOrderHandler,
   shipOrderHandler,
+  syncPaymentHandler,
 } from './controller';
 import { payOrderSchema, shipOrderSchema } from './schema';
 
@@ -18,5 +19,6 @@ export const orderRoutes = Router();
 orderRoutes.get('/', authenticate, listOrdersHandler);
 orderRoutes.get('/:id', authenticate, getOrderHandler);
 orderRoutes.post('/:id/pay', authenticate, validateBody(payOrderSchema), payOrderHandler);
+orderRoutes.post('/:id/payment/sync', authenticate, syncPaymentHandler);
 orderRoutes.post('/:id/ship', authenticate, validateBody(shipOrderSchema), shipOrderHandler);
 orderRoutes.post('/:id/confirm-delivery', authenticate, confirmDeliveryHandler);

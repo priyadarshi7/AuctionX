@@ -63,10 +63,23 @@ async function presignAndUpload(token: string, auctionId: string, contentType = 
   expect(presign.status).toBe(200);
   const form = new FormData();
   for (const [k, v] of Object.entries(presign.body.fields as Record<string, string>)) form.append(k, v);
-  form.append('file', new Blob([Buffer.alloc(bytes, 7)], { type: contentType }), 'cert.pdf');
+  form.append('file', new Blob([realisticBytes(contentType, bytes)], { type: contentType }), 'cert.pdf');
   const upload = await fetch(presign.body.uploadUrl as string, { method: 'POST', body: form });
   expect(upload.status).toBeLessThan(300);
   return presign.body.objectKey as string;
+}
+
+// The scanner (ADR-0043) checks that the bytes really are the declared type,
+// so test files need the right magic bytes, padded to the wanted size.
+function realisticBytes(contentType: string, size: number): Buffer {
+  const header: Record<string, Buffer> = {
+    'application/pdf': Buffer.from('%PDF-1.4\n'),
+    'image/jpeg': Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+    'image/png': Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    'image/webp': Buffer.from('RIFF\0\0\0\0WEBP'),
+  };
+  const head = header[contentType]!;
+  return Buffer.concat([head, Buffer.alloc(Math.max(0, size - head.length), 7)]);
 }
 
 const register = (token: string, auctionId: string, body: Record<string, unknown>) =>
@@ -183,7 +196,7 @@ describe('document upload', () => {
       new PutObjectCommand({
         Bucket: env.S3_DOCS_BUCKET,
         Key: objectKey,
-        Body: Buffer.alloc(MAX_DOCUMENT_BYTES + 1024, 1),
+        Body: Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(MAX_DOCUMENT_BYTES + 1024, 1)]),
         ContentType: 'application/pdf',
       }),
     );

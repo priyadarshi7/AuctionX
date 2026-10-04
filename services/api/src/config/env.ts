@@ -71,6 +71,14 @@ const envSchema = z.object({
   // Private bucket for seller documents (ADR-0041). MUST NOT be public:
   // downloads only ever happen through short-lived signed URLs.
   S3_DOCS_BUCKET: z.string().min(1).default('auctionx-docs'),
+  // Uploaded-document scanning (ADR-0043). 'basic' = built-in content checks
+  // only (works anywhere, no extra service). 'clamav' = also stream the file
+  // to a clamd daemon and FAIL CLOSED if it cannot be reached. ClamAV needs
+  // roughly 1GB of RAM, so it cannot run on Render's free tier; enable it
+  // where a clamd is available (docker compose --profile scan up clamav).
+  DOCUMENT_SCAN: z.enum(['basic', 'clamav']).default('basic'),
+  CLAMAV_HOST: z.string().min(1).default('127.0.0.1'),
+  CLAMAV_PORT: z.coerce.number().int().positive().default(3310),
   // Object storage (Section 27): s3mock locally, Cloudflare R2 in
   // production — both speak the same S3 API, so these defaults exactly
   // match docker-compose.yml's `s3mock` service (see its comment for the
@@ -109,6 +117,15 @@ const envSchema = z.object({
   // there, with Stripe's own signing secret) — this key only ever protects
   // traffic between this process and itself.
   MOCK_PAYMENT_WEBHOOK_SECRET: z.string().min(1).default('dev-mock-payment-webhook-secret'),
+  // Stripe Checkout (ADR-0044). TEST MODE ONLY: the refinement below refuses
+  // to boot with a live key, so a real card can never be charged by this
+  // deployment. Unset = the in-process mock provider (local dev and tests).
+  STRIPE_SECRET_KEY: z.string().min(1).optional(),
+  // The endpoint's signing secret (whsec_...), from the Stripe dashboard.
+  // Optional on purpose: without it the webhook route rejects every event but
+  // the buyer-triggered payment sync still settles payments.
+  STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
+  STRIPE_CURRENCY: z.string().length(3).toLowerCase().default('usd'),
   // Redpanda locally (docker-compose.yml, ADR-0027) — Kafka-API-compatible,
   // so this is a real Kafka broker address either way. Same reasoning as
   // REDIS_URL/S3_ENDPOINT: the app must still boot and serve core traffic
@@ -179,6 +196,18 @@ const envSchema = z.object({
         'KAFKA_SASL_USERNAME is set but KAFKA_SASL_PASSWORD and/or KAFKA_SSL_CA is missing — ' +
         'all three are required together for SASL_SSL, or none of them for a local unauthenticated broker.',
       path: ['KAFKA_SASL_USERNAME'],
+    });
+  }
+  // Hard stop on anything that is not a Stripe TEST key. Deliberately no
+  // override flag: this project must never take real payments. The message
+  // never echoes the key.
+  if (value.STRIPE_SECRET_KEY && !/^(sk|rk)_test_/.test(value.STRIPE_SECRET_KEY)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        'STRIPE_SECRET_KEY must be a Stripe TEST-mode key (sk_test_... or rk_test_...). ' +
+        'Live keys are refused: this platform does not process real payments.',
+      path: ['STRIPE_SECRET_KEY'],
     });
   }
   if (value.BREVO_API_KEY && !value.BREVO_FROM_EMAIL) {

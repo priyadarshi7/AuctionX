@@ -1,5 +1,6 @@
 import { Prisma, type Payment } from '@prisma/client';
-import { paymentProvider, mockPaymentProvider } from '../../infrastructure/payments';
+import { env } from '../../config/env';
+import { paymentProvider, mockPaymentProvider, type PaymentStatusSnapshot } from '../../infrastructure/payments';
 import { logger } from '../../infrastructure/observability/logger';
 import { ConflictError, ForbiddenError, NotFoundError, WebhookVerificationError } from '../../middleware/errors';
 import { findOrderById } from '../orders/repository';
@@ -7,7 +8,11 @@ import {
   applyPaymentWebhookEvent,
   createPaymentAttempt,
   findActivePaymentForOrder,
+  findPaymentById,
   findPaymentByOrderAndIdempotencyKey,
+  findPaymentByProviderRef,
+  findPendingPaymentForOrder,
+  markPaymentRefunded,
 } from './repository';
 
 // Reads modules/orders/repository.ts directly rather than going through
@@ -17,11 +22,13 @@ import {
 // direction (to create a payment intent for an order it owns), so this
 // stays a one-way dependency, not a cycle: payments depends on orders'
 // repository (data), orders depends on payments' service (business logic).
+export type PaymentStart = { payment: Payment; checkoutUrl: string | null };
+
 export async function createPaymentIntentForOrder(
   buyerId: string,
   orderId: string,
   idempotencyKey: string,
-): Promise<Payment> {
+): Promise<PaymentStart> {
   const order = await findOrderById(orderId);
   if (!order) {
     throw new NotFoundError('Order not found');
@@ -39,7 +46,23 @@ export async function createPaymentIntentForOrder(
   // FRESH idempotencyKey each time) without needing the exact same key.
   const active = await findActivePaymentForOrder(orderId);
   if (active) {
-    return active;
+    if (active.status !== 'PENDING') {
+      return { payment: active, checkoutUrl: null };
+    }
+    // An attempt is already in flight. Ask the provider where it stands: if
+    // the buyer left Stripe's page and comes back within its 30 minutes, send
+    // them back to the SAME page; if it was in fact paid or has expired,
+    // settle that first so a stale attempt can never wedge the order.
+    const status = await paymentProvider.fetchStatus(active.providerRef);
+    if (status.state === 'open') {
+      return { payment: active, checkoutUrl: status.checkoutUrl };
+    }
+    await settleFromSnapshot(active, status);
+    const refreshed = await findActivePaymentForOrder(orderId);
+    if (refreshed) {
+      return { payment: refreshed, checkoutUrl: null };
+    }
+    // The old attempt expired: fall through and start a fresh one.
   }
 
   // Deliberately NOT inside a transaction with the checks above: Section 65
@@ -52,16 +75,19 @@ export async function createPaymentIntentForOrder(
     orderId,
     amountCents: order.amountCents,
     idempotencyKey,
+    description: `AuctionX order ${orderId.slice(0, 8)}`,
+    returnUrl: `${env.FRONTEND_URL}/orders/${orderId}`,
   });
 
   try {
-    return await createPaymentAttempt({
+    const payment = await createPaymentAttempt({
       orderId,
       provider: paymentProvider.name,
       providerRef: intent.providerRef,
       amountCents: order.amountCents,
       idempotencyKey,
     });
+    return { payment, checkoutUrl: intent.checkoutUrl };
   } catch (err) {
     // Same pattern as bids/service.ts's P2002 handling for cross-auction
     // idempotency-key reuse: the DB constraint is the source of truth for
@@ -75,7 +101,7 @@ export async function createPaymentIntentForOrder(
       const existing = await findPaymentByOrderAndIdempotencyKey(orderId, idempotencyKey);
       if (existing) {
         logger.warn({ orderId }, 'payment.idempotent_replay_after_race');
-        return existing;
+        return { payment: existing, checkoutUrl: intent.checkoutUrl };
       }
     }
     throw err;
@@ -95,16 +121,89 @@ export async function handlePaymentWebhook(rawBody: Buffer, signatureHeader: str
   } catch (err) {
     throw new WebhookVerificationError(err instanceof Error ? err.message : 'Invalid webhook payload');
   }
+  // A verified event we deliberately do not act on (e.g. a Stripe event type
+  // we do not subscribe to). Acknowledged so the provider stops retrying.
+  if (!event) return;
 
-  const outcome = event.type === 'payment.succeeded' ? 'SUCCEEDED' : 'FAILED';
-  const result = await applyPaymentWebhookEvent(paymentProvider.name, event.providerRef, outcome);
+  await settlePayment(
+    event.providerRef,
+    event.type === 'payment.succeeded' ? 'SUCCEEDED' : 'FAILED',
+    event.type === 'payment.succeeded' ? event.amountCents : undefined,
+  );
+}
+
+// The ONE place a provider outcome becomes a state change, whether it arrived
+// by webhook or was fetched by reconciliation. Idempotent: the underlying
+// update only acts on a PENDING payment.
+async function settlePayment(providerRef: string, outcome: 'SUCCEEDED' | 'FAILED', claimedAmountCents?: number): Promise<void> {
+  if (outcome === 'SUCCEEDED' && claimedAmountCents !== undefined) {
+    // Tripwire (Section 19): if the provider says it collected a different
+    // amount than OUR record of this payment, do not mark it paid. Never
+    // happens with a correct integration, so it is logged as an error.
+    const payment = await findPaymentByProviderRef(paymentProvider.name, providerRef);
+    if (payment && payment.amountCents !== claimedAmountCents) {
+      logger.error(
+        { providerRef, expected: payment.amountCents, collected: claimedAmountCents },
+        'payment.amount_mismatch: provider collected a different amount than the order; NOT applied',
+      );
+      return;
+    }
+  }
+
+  const result = await applyPaymentWebhookEvent(paymentProvider.name, providerRef, outcome);
   if (!result.applied) {
     // Not necessarily a bug: a provider retrying a webhook it couldn't
     // confirm we received is expected and must be a silent no-op (Section
     // 41), and an unrecognized providerRef would mean a stale/foreign
     // event. Logged so a genuinely unexpected case is still visible.
-    logger.warn({ provider: paymentProvider.name, providerRef: event.providerRef, outcome }, 'payment.webhook_ignored');
+    logger.warn({ provider: paymentProvider.name, providerRef, outcome }, 'payment.webhook_ignored');
+    return;
   }
+  if (result.refundPaymentId) {
+    // Outside the transaction (Section 65: no row lock across a network call).
+    // A failure here is not fatal: the order stays flagged "needs refund" and
+    // an admin can retry from the dashboard.
+    await refundPayment(result.refundPaymentId).catch((err: unknown) => {
+      logger.error({ err, paymentId: result.refundPaymentId }, 'payment.auto_refund_failed');
+    });
+  }
+}
+
+async function settleFromSnapshot(payment: Payment, status: PaymentStatusSnapshot): Promise<void> {
+  if (status.state === 'paid') {
+    await settlePayment(payment.providerRef, 'SUCCEEDED', status.amountCents);
+  } else if (status.state === 'expired') {
+    await settlePayment(payment.providerRef, 'FAILED');
+  }
+}
+
+// Buyer-triggered reconciliation: ask the provider about this order's pending
+// payment instead of waiting for a webhook. Makes payment robust to a late,
+// dropped or not-yet-configured webhook. Safe to call repeatedly.
+export async function syncOrderPayment(buyerId: string, orderId: string): Promise<void> {
+  const order = await findOrderById(orderId);
+  if (!order) throw new NotFoundError('Order not found');
+  if (order.buyerId !== buyerId) throw new ForbiddenError('You are not the buyer on this order');
+
+  const pending = await findPendingPaymentForOrder(orderId);
+  if (!pending) return;
+  await settleFromSnapshot(pending, await paymentProvider.fetchStatus(pending.providerRef));
+}
+
+// Returns a SUCCEEDED payment's money to the buyer. Idempotent end to end: the
+// provider call carries refund-{paymentId} as its idempotency key (so a retry
+// can never refund twice), and the database record is a guarded update.
+export async function refundPayment(paymentId: string): Promise<void> {
+  const payment = await findPaymentById(paymentId);
+  if (!payment) throw new NotFoundError('Payment not found');
+  if (payment.status !== 'SUCCEEDED') {
+    throw new ConflictError('PAYMENT_NOT_REFUNDABLE', 'Only a successful payment can be refunded');
+  }
+  if (payment.refundedAt) return;
+
+  const { refundRef } = await paymentProvider.refund(payment.providerRef, `refund-${payment.id}`);
+  await markPaymentRefunded(payment.id, refundRef);
+  logger.info({ paymentId: payment.id, refundRef }, 'payment.refunded');
 }
 
 // Wired once at module load, not a static import in mockProvider.ts — see

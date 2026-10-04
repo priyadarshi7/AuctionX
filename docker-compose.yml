@@ -214,6 +214,18 @@ services:
       timeout: 5s
       retries: 10
 
+# ClamAV daemon for uploaded-document scanning (ADR-0043). Opt-in: it needs
+  # ~1GB of RAM and downloads its signature database on first start (several
+  # minutes), so it only runs with `docker compose --profile scan up clamav`.
+  # Then set DOCUMENT_SCAN=clamav in services/api/.env.
+  clamav:
+    image: clamav/clamav:stable
+    container_name: auctionx-clamav
+    profiles: ['scan']
+    restart: unless-stopped
+    ports:
+      - '3310:3310'
+
 volumes:
   postgres_data:
   s3mock_data:

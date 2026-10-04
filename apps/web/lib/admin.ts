@@ -90,6 +90,10 @@ export function listOrdersAdminRequest(
   });
 }
 
+export function refundOrderRequest(accessToken: string, orderId: string): Promise<{ refunded: boolean }> {
+  return apiFetch(`/admin/orders/${orderId}/refund`, { method: 'POST', accessToken });
+}
+
 export function listAuditLogRequest(
   accessToken: string,
   cursor?: string,

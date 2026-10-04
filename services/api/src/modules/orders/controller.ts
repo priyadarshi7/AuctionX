@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { UnauthorizedError } from '../../middleware/errors';
-import { confirmOrderDelivered, getOrderForViewer, listMyOrders, payForOrder, shipOrder } from './service';
+import { confirmOrderDelivered, getOrderForViewer, listMyOrders, payForOrder, shipOrder, syncPayment } from './service';
 import type { PayOrderInput, ShipOrderInput } from './schema';
 
 export async function listOrdersHandler(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -33,8 +33,20 @@ export async function payOrderHandler(req: Request, res: Response, next: NextFun
       throw new UnauthorizedError('UNAUTHENTICATED');
     }
     const { idempotencyKey } = req.body as PayOrderInput;
-    const payment = await payForOrder(req.user.id, req.params.id as string, idempotencyKey);
-    res.status(200).json({ payment });
+    const { payment, checkoutUrl } = await payForOrder(req.user.id, req.params.id as string, idempotencyKey);
+    res.status(200).json({ payment, checkoutUrl });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function syncPaymentHandler(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.user) {
+      throw new UnauthorizedError('UNAUTHENTICATED');
+    }
+    await syncPayment(req.user.id, req.params.id as string);
+    res.status(200).json({ synced: true });
   } catch (err) {
     next(err);
   }

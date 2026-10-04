@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
+import { paymentProvider } from '../../infrastructure/payments';
 import { handlePaymentWebhook } from './service';
 
 // No authenticate/req.user here on purpose — a payment provider calling
@@ -10,7 +11,7 @@ import { handlePaymentWebhook } from './service';
 export async function paymentWebhookHandler(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const rawBody = req.body as Buffer;
-    const signatureHeader = req.header('x-mock-signature');
+    const signatureHeader = req.header(paymentProvider.signatureHeader);
     await handlePaymentWebhook(rawBody, signatureHeader);
     res.status(200).json({ received: true });
   } catch (err) {
