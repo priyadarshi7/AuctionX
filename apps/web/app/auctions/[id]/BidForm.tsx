@@ -131,7 +131,10 @@ export function BidForm({
         error={errors.amount?.message}
       >
         <div className="relative">
-          <span aria-hidden className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 font-display font-bold">
+          <span
+            aria-hidden
+            className="figures pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-2xl text-muted-foreground"
+          >
             $
           </span>
           <input
@@ -143,26 +146,25 @@ export function BidForm({
             aria-invalid={errors.amount ? true : undefined}
             aria-describedby={errors.amount ? 'amount-error' : undefined}
             {...register('amount')}
-            className={`${inputClass(!!errors.amount)} pl-8 font-display text-lg font-bold`}
+            className={`${inputClass(!!errors.amount)} figures h-14! pl-10! text-2xl!`}
           />
         </div>
       </Field>
 
-      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Quick bid amounts">
-        <span className="text-xs font-semibold uppercase tracking-wide text-ink/60">Quick</span>
+      <div className="grid grid-cols-3 gap-2" role="group" aria-label="Quick bid amounts">
         {QUICK_STEPS_CENTS.map((step) => (
           <button
             key={step}
             type="button"
             onClick={() => fillQuick(step)}
-            className="rounded-full border-2 border-line bg-white px-3 py-1 text-sm font-semibold transition-colors hover:bg-yellow"
+            className="figures h-10 border border-border-strong text-lg transition-colors hover:border-accent hover:bg-accent-soft"
           >
             +{formatCents(step).replace('.00', '')}
           </button>
         ))}
       </div>
 
-      <Button type="submit" disabled={isSubmitting} className="w-full">
+      <Button type="submit" disabled={isSubmitting} className="btn-accent w-full">
         {isSubmitting ? 'Placing bid…' : 'Place bid'}
       </Button>
 
@@ -172,7 +174,7 @@ export function BidForm({
           {needsVerification && (
             <div className="mt-2">
               {resendState === 'sent' ? (
-                <span className="text-sm font-semibold">Check your inbox — a new link is on its way.</span>
+                <span className="text-sm font-medium">Check your inbox — a new link is on its way.</span>
               ) : (
                 <Button type="button" size="sm" variant="secondary" disabled={resendState === 'sending'} onClick={handleResend}>
                   {resendState === 'sending' ? 'Sending…' : 'Resend verification email'}

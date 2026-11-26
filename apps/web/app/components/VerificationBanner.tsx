@@ -33,12 +33,12 @@ export function VerificationBanner() {
   };
 
   return (
-    <div className="border-b-2 border-line bg-yellow px-4 py-2.5">
+    <div className="border-b border-accent/25 bg-accent-soft px-4 py-2">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 text-sm">
-        <p className="font-semibold">
+        <p className="font-medium">
           Verify your email to sell items and place bids.{' '}
-          {state === 'sent' && <span className="font-normal">Check your inbox — a new link is on its way.</span>}
-          {state === 'error' && <span className="font-normal text-ink/70">{errorMessage}</span>}
+          {state === 'sent' && <span className="font-normal text-muted-foreground">Check your inbox — a new link is on its way.</span>}
+          {state === 'error' && <span className="font-normal text-urgent">{errorMessage}</span>}
         </p>
         {state !== 'sent' && (
           <Button

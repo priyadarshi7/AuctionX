@@ -2,38 +2,48 @@ import type { AuctionStatus } from '@/lib/types/auction';
 import type { OrderStatus } from '@/lib/types/order';
 import type { ValuationStatus } from '@/lib/types/valuation';
 
-const AUCTION: Record<AuctionStatus, { label: string; cls: string }> = {
-  DRAFT: { label: 'Draft', cls: 'bg-cream-2' },
-  PENDING_REVIEW: { label: 'In review', cls: 'bg-cyan' },
-  PUBLISHED: { label: 'Scheduled', cls: 'bg-cyan' },
-  ACTIVE: { label: 'Live', cls: 'bg-green' },
-  PAUSED: { label: 'Paused', cls: 'bg-yellow' },
-  ENDED: { label: 'Ended', cls: 'bg-ink text-cream' },
-  CANCELLED: { label: 'Cancelled', cls: 'bg-white' },
+type Tone = 'neutral' | 'live' | 'accent' | 'muted';
+
+const DOT: Record<Tone, string> = {
+  neutral: 'bg-foreground/50',
+  live: 'bg-live',
+  accent: 'bg-accent',
+  muted: 'bg-muted-foreground/40',
 };
 
-const ORDER: Record<OrderStatus, { label: string; cls: string }> = {
-  PENDING_PAYMENT: { label: 'Awaiting payment', cls: 'bg-yellow' },
-  PAID: { label: 'Paid', cls: 'bg-green' },
-  SHIPPED: { label: 'Shipped', cls: 'bg-cyan' },
-  DELIVERED: { label: 'Delivered', cls: 'bg-green' },
-  CANCELLED: { label: 'Cancelled', cls: 'bg-white' },
+type Meta = { label: string; tone: Tone };
+
+const AUCTION: Record<AuctionStatus, Meta> = {
+  DRAFT: { label: 'Draft', tone: 'muted' },
+  PENDING_REVIEW: { label: 'In review', tone: 'accent' },
+  PUBLISHED: { label: 'Scheduled', tone: 'neutral' },
+  ACTIVE: { label: 'Live', tone: 'live' },
+  PAUSED: { label: 'Paused', tone: 'accent' },
+  ENDED: { label: 'Ended', tone: 'neutral' },
+  CANCELLED: { label: 'Cancelled', tone: 'muted' },
 };
 
-// No red/error color precedent in this pill palette (errors elsewhere use
-// Notice tone="error" instead, e.g. app/orders/[id]/page.tsx) — FAILED
-// reuses the same neutral `bg-white` CANCELLED/ORDER already uses for "this
-// didn't happen," since ValuationPanel pairs it with a Notice for the
-// actual error message.
-const VALUATION: Record<ValuationStatus, { label: string; cls: string }> = {
-  PENDING: { label: 'Analyzing…', cls: 'bg-yellow' },
-  COMPLETE: { label: 'Ready', cls: 'bg-green' },
-  FAILED: { label: 'Failed', cls: 'bg-white' },
+const ORDER: Record<OrderStatus, Meta> = {
+  PENDING_PAYMENT: { label: 'Awaiting payment', tone: 'accent' },
+  PAID: { label: 'Paid', tone: 'live' },
+  SHIPPED: { label: 'Shipped', tone: 'neutral' },
+  DELIVERED: { label: 'Delivered', tone: 'live' },
+  CANCELLED: { label: 'Cancelled', tone: 'muted' },
 };
 
-function Pill({ label, cls }: { label: string; cls: string }) {
+// FAILED stays neutral on purpose: ValuationPanel pairs it with an error
+// Notice that carries the actual message.
+const VALUATION: Record<ValuationStatus, Meta> = {
+  PENDING: { label: 'Analyzing…', tone: 'accent' },
+  COMPLETE: { label: 'Ready', tone: 'live' },
+  FAILED: { label: 'Failed', tone: 'muted' },
+};
+
+// Dot + word: the status is always readable as text, the dot only helps scan.
+function Pill({ label, tone }: Meta) {
   return (
-    <span className={`inline-flex items-center rounded-full border-2 border-line px-2.5 py-0.5 text-xs font-semibold ${cls}`}>
+    <span className="inline-flex items-center gap-1.5 border border-border-strong px-2 py-1 text-[10px] font-medium uppercase leading-none tracking-[0.14em]">
+      <span aria-hidden className={`size-1.5 rounded-full ${DOT[tone]}`} />
       {label}
     </span>
   );

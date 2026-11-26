@@ -1,12 +1,21 @@
 'use client';
 
+import { IconGavel, IconPlugConnectedX } from '@tabler/icons-react';
 import Link from 'next/link';
-import { CATEGORY_DISPLAY, CATEGORY_ORDER, THEME_CLASSES } from '@/lib/categoryDisplay';
+import { CATEGORY_DISPLAY } from '@/lib/categoryDisplay';
 import type { AuctionCategory } from '@/lib/types/auction';
-import { AuctionCard } from '../AuctionCard';
-import { AuctionCardSkeleton } from '../AuctionCardSkeleton';
-import { Mascot } from '../Mascot';
-import { useLiveAuctions } from './useLiveAuctions';
+import { CategoryFilter } from '../CategoryFilter';
+import { LotLedger } from '../LotLedger';
+import { Button, ButtonLink } from '../ui/Button';
+import { PageMessage, Skeleton } from '../ui/Page';
+import { useHomeSale, type SaleState } from './useHomeSale';
+
+const HEADING: Record<SaleState, { title: string; note: string }> = {
+  live: { title: 'Order of sale', note: 'Live lots, soonest to close first. Refreshes by itself.' },
+  upcoming: { title: 'Upcoming lots', note: 'Nothing is open for bidding yet. These are next.' },
+  closed: { title: 'Past lots', note: 'Nothing is open right now. Here is what closed most recently.' },
+  empty: { title: 'Order of sale', note: 'No lots in this department yet.' },
+};
 
 export function LiveAuctions({
   category,
@@ -15,110 +24,78 @@ export function LiveAuctions({
   category: AuctionCategory | '';
   onCategoryChange: (category: AuctionCategory | '') => void;
 }) {
-  const query = useLiveAuctions(category);
-  const auctions = query.data?.auctions ?? [];
-  const label = category ? CATEGORY_DISPLAY[category].label : 'every category';
+  const sale = useHomeSale(category);
+  const { title, note } = HEADING[sale.state];
+  const lots =
+    sale.state === 'live'
+      ? [...sale.lots].sort((a, b) => new Date(a.endTime ?? 0).getTime() - new Date(b.endTime ?? 0).getTime())
+      : sale.lots;
 
   return (
-    <section id="live" className="scroll-mt-20 border-y-2 border-line bg-cream-2 py-16">
-      <div className="mx-auto max-w-6xl px-6">
-        <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 className="font-display text-3xl font-extrabold sm:text-4xl">Live right now</h2>
-            <p className="mt-1 text-ink/60" aria-live="polite">
-              {query.isSuccess ? `${auctions.length} live in ${label}, refreshing automatically.` : 'Checking the floor…'}
-            </p>
-          </div>
-          <Link href="/auctions" className="text-sm font-semibold underline underline-offset-4">
-            Browse all auctions
-          </Link>
+    <section id="live" className="mx-auto w-full max-w-6xl scroll-mt-24 px-4 py-14 sm:px-6">
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-3xl font-medium tracking-tight">{title}</h2>
+          <p className="mt-1 text-sm text-muted-foreground" aria-live="polite">
+            {sale.isLoading ? 'Checking the saleroom…' : note}
+          </p>
         </div>
-
-        <div
-          role="group"
-          aria-label="Filter live auctions by category"
-          className="-mx-6 mb-8 flex gap-2 overflow-x-auto px-6 pb-2"
-        >
-          <button
-            type="button"
-            aria-pressed={category === ''}
-            onClick={() => onCategoryChange('')}
-            className={`shrink-0 rounded-full border-2 border-line px-4 py-1.5 text-sm font-semibold transition-colors ${
-              category === '' ? 'bg-ink text-cream' : 'bg-white hover:bg-cream'
-            }`}
-          >
-            All
-          </button>
-          {CATEGORY_ORDER.map((c) => {
-            const display = CATEGORY_DISPLAY[c];
-            const theme = THEME_CLASSES[display.theme];
-            const active = category === c;
-            return (
-              <button
-                key={c}
-                type="button"
-                aria-pressed={active}
-                onClick={() => onCategoryChange(active ? '' : c)}
-                className={`shrink-0 rounded-full border-2 border-line px-4 py-1.5 text-sm font-semibold transition-colors ${
-                  active ? `${theme.bg} ${theme.text}` : 'bg-white hover:bg-cream'
-                }`}
-              >
-                {display.emoji} {display.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {query.isError && (
-          <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-line/30 py-12 text-center">
-            <p className="text-ink/70">Couldn&apos;t load live auctions.</p>
-            <button
-              type="button"
-              onClick={() => void query.refetch()}
-              className="rounded-full border-2 border-line bg-white px-5 py-2 text-sm font-semibold shadow-hard-sm transition-transform hover:-translate-y-0.5"
-            >
-              Try again
-            </button>
-          </div>
-        )}
-
-        {query.isLoading && (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-            {Array.from({ length: 4 }, (_, i) => (
-              <AuctionCardSkeleton key={i} />
-            ))}
-          </div>
-        )}
-
-        {query.isSuccess && auctions.length === 0 && (
-          <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-line/30 py-12 text-center">
-            <Mascot className="h-16 w-16" color="#ff5c8a" />
-            <p className="text-ink/70">Nothing live in {label} this second.</p>
-            <div className="flex gap-4 text-sm font-semibold">
-              {category && (
-                <button type="button" onClick={() => onCategoryChange('')} className="underline underline-offset-4">
-                  Show all categories
-                </button>
-              )}
-              <Link href="/auctions/new" className="underline underline-offset-4">
-                Sell an item
-              </Link>
-            </div>
-          </div>
-        )}
-
-        {auctions.length > 0 && (
-          <div
-            className={`grid grid-cols-2 gap-4 transition-opacity sm:grid-cols-3 lg:grid-cols-4 ${
-              query.isPlaceholderData ? 'opacity-50' : ''
-            }`}
-          >
-            {auctions.map((auction) => (
-              <AuctionCard key={auction.id} auction={auction} />
-            ))}
-          </div>
-        )}
+        <Link href="/auctions" className="eyebrow border-b border-foreground pb-0.5 text-foreground hover:text-accent">
+          Full catalogue
+        </Link>
       </div>
+
+      <CategoryFilter
+        value={category}
+        onChange={onCategoryChange}
+        label="Filter lots by department"
+        className="mb-6"
+      />
+
+      {sale.isError && (
+        <PageMessage
+          icon={IconPlugConnectedX}
+          title="Couldn't load the lots"
+          body="Check your connection and try again."
+          action={
+            <Button variant="secondary" size="sm" onClick={sale.refetch}>
+              Try again
+            </Button>
+          }
+        />
+      )}
+
+      {sale.isLoading && (
+        <div className="flex flex-col gap-3" aria-busy="true">
+          {Array.from({ length: 4 }, (_, i) => (
+            <Skeleton key={i} className="h-20 w-full" />
+          ))}
+        </div>
+      )}
+
+      {!sale.isLoading && !sale.isError && lots.length === 0 && (
+        <PageMessage
+          icon={IconGavel}
+          title={category ? `No lots in ${CATEGORY_DISPLAY[category].label}` : 'The catalogue is empty'}
+          body="New lots are added all the time. You can also list one yourself."
+          action={
+            <div className="flex flex-wrap justify-center gap-2">
+              {category && (
+                <Button variant="secondary" size="sm" onClick={() => onCategoryChange('')}>
+                  All departments
+                </Button>
+              )}
+              <ButtonLink href="/auctions/new" size="sm">
+                Sell an item
+              </ButtonLink>
+            </div>
+          }
+        />
+      )}
+
+      {!sale.isError && lots.length > 0 && (
+        <LotLedger auctions={lots} className={sale.isStale ? 'opacity-50' : ''} />
+      )}
     </section>
   );
 }

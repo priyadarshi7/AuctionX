@@ -1,142 +1,160 @@
 'use client';
 
+import { IconArrowRight } from '@tabler/icons-react';
 import Link from 'next/link';
-import { formatCents } from '@/lib/format';
+import { TextScribble } from '@/components/wensity/text-scribble';
+import { CATEGORY_DISPLAY } from '@/lib/categoryDisplay';
+import { CONDITION_LABEL, lotRef } from '@/lib/lot';
 import type { Auction } from '@/lib/types/auction';
-import { useTimeRemaining } from '@/lib/useTimeRemaining';
-import { Mascot } from '../Mascot';
+import { PRICE_LABEL } from '../AuctionCard';
+import { SaleClock } from '../Countdown';
+import { Plate } from '../Plate';
+import { PriceTicker } from '../PriceTicker';
+import { ButtonLink } from '../ui/Button';
+import { Skeleton } from '../ui/Page';
+import { EmptySale } from './EmptySale';
+import type { SaleState } from './useHomeSale';
 
-// The auction that ends soonest — the most honest "come look at this now".
-function Spotlight({ auction }: { auction: Auction }) {
-  const timeRemaining = useTimeRemaining(auction.endTime);
-  const urgent = /^\d+s$/.test(timeRemaining);
+const SALE_LINE: Record<SaleState, string> = {
+  live: 'now open',
+  upcoming: 'opening soon',
+  closed: 'between sales',
+  empty: 'being prepared',
+};
 
+const KICKER: Record<SaleState, string> = {
+  live: 'Closing next',
+  upcoming: 'Coming up',
+  closed: 'Recently closed',
+  empty: '',
+};
+
+// Live: the lot ending soonest. Otherwise the first photographed lot.
+function pickFeature(lots: Auction[], state: SaleState): Auction | undefined {
+  if (state === 'live') {
+    return [...lots].sort((a, b) => new Date(a.endTime ?? 0).getTime() - new Date(b.endTime ?? 0).getTime())[0];
+  }
+  return lots.find((lot) => lot.images.length > 0) ?? lots[0];
+}
+
+function Spread({ lot, state }: { lot: Auction; state: SaleState }) {
+  // Without a photograph the spread is set as type alone; an empty frame the
+  // size of the page would say nothing.
+  const photo = lot.images[0];
   return (
-    <Link
-      href={`/auctions/${auction.id}`}
-      className="group block w-full max-w-sm rotate-2 rounded-2xl border-2 border-line bg-white shadow-hard transition-transform hover:-translate-y-1 hover:rotate-0"
+    <article
+      className={`grid items-center gap-8 py-10 lg:gap-14 lg:py-14 ${photo ? 'lg:grid-cols-[1fr_0.85fr]' : ''}`}
     >
-      <div className="relative aspect-4/3 overflow-hidden rounded-t-[14px] border-b-2 border-line bg-cream-2">
-        {auction.images[0] ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={auction.images[0]}
-            alt={auction.title}
-            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center">
-            <Mascot className="h-24 w-24 opacity-70" />
-          </div>
-        )}
-        <span className="absolute left-3 top-3 rounded-full border-2 border-line bg-cream px-2.5 py-0.5 text-xs font-semibold">
-          Ending soonest
-        </span>
-      </div>
-      <div className="flex flex-col gap-3 p-4">
-        <p className="line-clamp-2 font-display text-lg font-bold leading-tight">{auction.title}</p>
-        <div className="flex items-end justify-between gap-3">
+      <div className="order-2 min-w-0 lg:order-1">
+        <p className="eyebrow">
+          <span className="text-accent">{KICKER[state]}</span> · Lot {lotRef(lot.id)}
+        </p>
+        <h2 className="mt-4 text-4xl font-medium leading-[1.04] tracking-tight sm:text-6xl">
+          <Link href={`/auctions/${lot.id}`} className="underline-offset-8 hover:underline">
+            {lot.title}
+          </Link>
+        </h2>
+        <p className="mt-4 font-serif text-lg italic text-muted-foreground">
+          {CATEGORY_DISPLAY[lot.category].label} · Condition: {CONDITION_LABEL[lot.condition].toLowerCase()}
+        </p>
+
+        <div className="mt-8 flex flex-wrap items-end gap-x-12 gap-y-6 border-t border-border-strong pt-6">
           <div>
-            <p className="text-[11px] uppercase tracking-wide text-ink/60">Current bid</p>
-            <p className="font-display text-2xl font-extrabold">{formatCents(auction.currentPriceCents)}</p>
+            <p className="eyebrow mb-2">{PRICE_LABEL[lot.status]}</p>
+            <PriceTicker key={lot.id} cents={lot.currentPriceCents} className="text-5xl leading-none" />
           </div>
-          <span
-            className={`flex items-center gap-1.5 rounded-full border-2 border-line px-3 py-1 font-display text-sm font-bold tabular-nums ${
-              urgent ? 'bg-pink' : 'bg-green'
-            }`}
-          >
-            <span className="h-1.5 w-1.5 rounded-full bg-ink" />
-            {timeRemaining}
-          </span>
+          {state === 'live' && (
+            <div>
+              <p className="eyebrow mb-2">Closes in</p>
+              <SaleClock endTime={lot.endTime} />
+            </div>
+          )}
         </div>
-        <span className="rounded-full border-2 border-line bg-yellow py-2 text-center font-display font-bold shadow-hard-sm">
-          Place a bid
-        </span>
+
+        <div className="mt-8 flex flex-wrap gap-3">
+          <ButtonLink href={`/auctions/${lot.id}`} className={state === 'live' ? 'btn-accent' : ''}>
+            {state === 'live' ? 'Bid on this lot' : 'View this lot'}
+            <IconArrowRight aria-hidden className="size-4" stroke={1.6} />
+          </ButtonLink>
+          <ButtonLink href="/auctions" variant="secondary">
+            Open the catalogue
+          </ButtonLink>
+        </div>
       </div>
-    </Link>
+
+      {photo && (
+        <Link href={`/auctions/${lot.id}`} tabIndex={-1} aria-hidden className="order-1 block lg:order-2">
+          <Plate
+            src={photo}
+            alt=""
+            eager
+            ratio={1}
+            className="mx-auto w-full max-w-md rotate-1 shadow-2xl transition-transform duration-500 hover:rotate-0"
+          />
+        </Link>
+      )}
+    </article>
   );
 }
 
 export function Hero({
-  auctions,
+  lots,
+  state,
   loading,
+  failed,
   signedIn,
+  onHowSelling,
 }: {
-  auctions: Auction[];
+  lots: Auction[];
+  state: SaleState;
   loading: boolean;
+  failed: boolean;
   signedIn: boolean;
+  onHowSelling: () => void;
 }) {
-  const spotlight = [...auctions]
-    .filter((a) => a.endTime)
-    .sort((a, b) => new Date(a.endTime!).getTime() - new Date(b.endTime!).getTime())[0];
+  const feature = pickFeature(lots, state);
 
   return (
-    <section className="bg-grid relative overflow-hidden border-b-2 border-line">
-      <div className="mx-auto grid max-w-6xl items-center gap-12 px-6 py-16 sm:py-24 lg:grid-cols-[1.25fr_1fr]">
-        <div className="flex flex-col gap-7">
-          <span className="flex w-fit items-center gap-2 rounded-full border-2 border-line bg-white px-4 py-1.5 text-sm font-semibold shadow-hard-sm">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="pulse-ring absolute inline-flex h-full w-full rounded-full bg-green" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full border border-line bg-green" />
-            </span>
-            {loading
-              ? 'Live bidding, in real time'
-              : `${auctions.length}${auctions.length >= 8 ? '+' : ''} auctions live now`}
-          </span>
-
-          <h1 className="font-display text-5xl font-extrabold leading-[0.95] tracking-tight sm:text-7xl">
-            BID ON THE
-            <br />
-            <span className="rounded-xl bg-ink px-3 text-cream">STUFF EVERYONE</span>
-            <br />
-            WANTS.
-          </h1>
-
-          <p className="max-w-xl text-lg text-ink/70">
-            Sneakers, Pok&eacute;mon cards, rare books, watches &mdash; a real-time auction floor where every bid is
-            server-verified and the clock extends if someone snipes.
-          </p>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <Link
-              href="/auctions"
-              className="rounded-full border-2 border-line bg-yellow px-6 py-3 font-display font-bold shadow-hard transition-transform hover:-translate-y-0.5"
+    <section className="mx-auto w-full max-w-6xl px-4 pt-10 sm:px-6">
+      {/* Sale heading, set like the front of a catalogue. */}
+      <header className="flex flex-wrap items-end justify-between gap-x-8 gap-y-3 border-b-2 border-foreground pb-5">
+        <h1 className="text-3xl font-medium tracking-tight sm:text-4xl">
+          The sale is{' '}
+          {loading ? (
+            <span className="italic text-muted-foreground">opening…</span>
+          ) : (
+            <TextScribble
+              key={failed ? 'failed' : state}
+              type="underline"
+              color="var(--accent)"
+              strokeWidth={2.5}
+              className="italic"
             >
-              Browse auctions
-            </Link>
-            <Link
-              href={signedIn ? '/auctions/new' : '/register'}
-              className="rounded-full border-2 border-line bg-white px-6 py-3 font-display font-bold transition-transform hover:-translate-y-0.5"
-            >
-              {signedIn ? 'Sell an item' : 'Create an account'}
-            </Link>
+              {failed ? 'out of reach' : SALE_LINE[state]}
+            </TextScribble>
+          )}
+        </h1>
+        <p className="max-w-sm text-sm leading-6 text-muted-foreground">
+          Rare things, sold by open bidding. Every bid is checked by the server, and a late bid extends the clock.
+        </p>
+      </header>
+
+      {loading && (
+        <div className="grid gap-10 py-14 lg:grid-cols-[1fr_0.85fr]" aria-busy="true">
+          <div className="flex flex-col gap-5">
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-32 w-full" />
+            <Skeleton className="h-24 w-3/4" />
           </div>
-
-          <ul className="flex flex-wrap gap-x-5 gap-y-2 text-sm font-medium text-ink/70">
-            <li>&#10003; Server-verified bids</li>
-            <li>&#10003; 30-second anti-sniping</li>
-            <li>&#10003; Instant outbid alerts</li>
-          </ul>
+          <Skeleton className="mx-auto aspect-square w-full max-w-md" />
         </div>
+      )}
 
-        <div className="flex justify-center lg:justify-end">
-          {loading && (
-            <div
-              aria-hidden
-              className="h-96 w-full max-w-sm rotate-2 animate-pulse rounded-2xl border-2 border-line bg-white shadow-hard"
-            />
-          )}
-          {!loading && spotlight && <Spotlight auction={spotlight} />}
-          {!loading && !spotlight && (
-            <div className="flex flex-col items-center gap-4">
-              <Mascot className="h-40 w-40" />
-              <div className="-rotate-2 rounded-xl border-2 border-line bg-cream-2 px-4 py-2 font-hand text-xl shadow-hard-sm">
-                the floor&apos;s quiet &mdash; list something!
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+      {!loading && feature && <Spread lot={feature} state={state} />}
+
+      {/* A failed request is not an empty saleroom: the list below shows the
+          error and a retry button, so nothing is claimed here. */}
+      {!loading && !failed && !feature && <EmptySale signedIn={signedIn} onHowSelling={onHowSelling} />}
     </section>
   );
 }

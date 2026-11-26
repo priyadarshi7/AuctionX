@@ -62,27 +62,27 @@ export function DocumentsPanel({
 
   return (
     <div>
-      {docs.isLoading && <p className="text-sm text-ink/60">Loading documents…</p>}
+      {docs.isLoading && <p className="text-sm text-muted-foreground">Loading documents…</p>}
       {!docs.isLoading && documents.length === 0 && (
-        <p className="text-sm text-ink/70">{editable ? 'No documents yet.' : 'No documents were attached.'}</p>
+        <p className="text-sm text-muted-foreground">{editable ? 'No documents yet.' : 'No documents were attached.'}</p>
       )}
       {documents.length > 0 && (
-        <ul className="overflow-hidden rounded-xl border-2 border-line bg-white">
+        <ul className="overflow-hidden rounded-xl border border-border bg-surface">
           {documents.map((doc) => (
             <li
               key={doc.id}
-              className="flex items-center justify-between gap-3 border-b border-line/10 px-3 py-2 text-sm last:border-b-0"
+              className="flex items-center justify-between gap-3 border-b border-border px-3 py-2 text-sm last:border-b-0"
             >
               <a
                 href={doc.url}
                 target="_blank"
                 rel="noreferrer"
-                className="min-w-0 truncate font-semibold underline underline-offset-4"
+                className="min-w-0 truncate font-medium underline underline-offset-4"
               >
                 {doc.fileName}
               </a>
               <span className="flex shrink-0 items-center gap-3">
-                <span className="text-ink/60">{formatSize(doc.sizeBytes)}</span>
+                <span className="text-muted-foreground">{formatSize(doc.sizeBytes)}</span>
                 {editable && (
                   <Button
                     size="sm"
@@ -123,7 +123,7 @@ export function DocumentsPanel({
           >
             {upload.isPending ? 'Uploading…' : full ? `Limit of ${MAX_DOCUMENTS} reached` : 'Add a document'}
           </Button>
-          <p className="mt-1.5 text-xs text-ink/60">PDF, JPG, PNG or WebP, up to 10 MB each.</p>
+          <p className="mt-1.5 text-xs text-muted-foreground">PDF, JPG, PNG or WebP, up to 10 MB each.</p>
         </div>
       )}
       {errorMessage && (

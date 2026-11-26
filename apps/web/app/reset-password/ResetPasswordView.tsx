@@ -43,7 +43,7 @@ export function ResetPasswordView() {
     footer: (
       <>
         Back to{' '}
-        <Link href="/login" className="font-semibold text-ink underline underline-offset-4">
+        <Link href="/login" className="font-medium text-foreground underline underline-offset-4">
           Log in
         </Link>
       </>
@@ -60,7 +60,7 @@ export function ResetPasswordView() {
       <AuthShell {...shellProps} subtitle="This link is missing its token.">
         <Notice tone="error">
           This password reset link looks incomplete. Request a new one from{' '}
-          <Link href="/forgot-password" className="font-semibold underline underline-offset-4">
+          <Link href="/forgot-password" className="font-medium underline underline-offset-4">
             the reset page
           </Link>
           .

@@ -1,20 +1,32 @@
 'use client';
 
+import { IconLogout, IconMenu2 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { Button } from '@/components/wensity/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/wensity/dropdown-menu';
 import { logoutRequest } from '@/lib/auth';
 import { useAuthStore } from '@/store/authStore';
+import { CatalogueSearch } from './components/CatalogueSearch';
+import { ThemeToggle } from './components/ThemeToggle';
+import { ButtonLink } from './components/ui/Button';
 import { NotificationBell } from './NotificationBell';
 
-function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
-  const pathname = usePathname();
-  const active = pathname === href || (href !== '/' && pathname.startsWith(href));
-
+function NavLink({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
   return (
     <Link
       href={href}
-      className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
-        active ? 'bg-cyan text-ink' : 'text-ink/70 hover:bg-cream-2 hover:text-ink'
+      aria-current={active ? 'page' : undefined}
+      className={`flex h-full items-center whitespace-nowrap border-b-2 pt-0.5 text-[11px] font-medium uppercase tracking-[0.16em] transition-colors ${
+        active
+          ? 'border-accent text-foreground'
+          : 'border-transparent text-muted-foreground hover:border-border-strong hover:text-foreground'
       }`}
     >
       {children}
@@ -26,6 +38,8 @@ export function NavBar() {
   const user = useAuthStore((state) => state.user);
   const status = useAuthStore((state) => state.status);
   const clearSession = useAuthStore((state) => state.clearSession);
+  const pathname = usePathname();
+  const signedIn = status === 'authenticated' && !!user;
 
   const handleLogout = async () => {
     // Best-effort: even if the network call fails, the user's intent is to
@@ -36,64 +50,112 @@ export function NavBar() {
     clearSession();
   };
 
+  // One list drives both the desktop links and the mobile menu.
+  const links = [
+    { href: '/auctions', label: 'Catalogue' },
+    ...(signedIn
+      ? [
+          { href: '/auctions/new', label: 'Sell' },
+          { href: '/my-auctions', label: 'My auctions' },
+          { href: '/orders', label: 'Orders' },
+          ...(user.role === 'ADMIN' ? [{ href: '/admin', label: 'Admin' }] : []),
+        ]
+      : []),
+  ];
+
+  // The most specific match wins, so /auctions/new lights up Sell, not Browse.
+  const activeHref = links
+    .map((link) => link.href)
+    .filter((href) => pathname === href || pathname.startsWith(`${href}/`))
+    .sort((a, b) => b.length - a.length)[0];
+
   return (
-    <header className="sticky top-0 z-20 border-b-2 border-line bg-cream/95 px-4 py-3 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
-        <Link href="/" className="flex items-center gap-2 font-display text-xl font-extrabold tracking-tight">
-          <span className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-line bg-yellow text-sm">
-            {'\u{1FA99}'}
-          </span>
-          AuctionX
+    <header className="sticky top-0 z-40 bg-background/90 backdrop-blur-md">
+      <div className="mx-auto flex h-16 max-w-6xl items-center gap-4 px-4 sm:gap-8 sm:px-6">
+        <Link href="/" className="font-serif text-2xl font-medium leading-none tracking-tight">
+          Auction<span className="italic text-accent">X</span>
         </Link>
 
-        <nav className="hidden items-center gap-1 rounded-full border-2 border-line bg-white px-1.5 py-1.5 sm:flex">
-          <NavLink href="/auctions">Browse</NavLink>
-          {status === 'authenticated' && (
-            <>
-              <NavLink href="/auctions/new">Sell</NavLink>
-              <NavLink href="/my-auctions">My auctions</NavLink>
-              <NavLink href="/orders">Orders</NavLink>
-              {user?.role === 'ADMIN' && <NavLink href="/admin">Admin</NavLink>}
-            </>
-          )}
+        <nav aria-label="Main" className="hidden h-full items-stretch gap-6 md:flex">
+          {links.map((link) => (
+            <NavLink key={link.href} href={link.href} active={link.href === activeHref}>
+              {link.label}
+            </NavLink>
+          ))}
         </nav>
 
-        <div className="flex items-center gap-3">
-          {status === 'checking' && <span className="text-sm text-ink/50">Checking session…</span>}
-          {status === 'authenticated' && user && (
+        <div className="ml-auto flex items-center gap-1">
+          <CatalogueSearch />
+          <ThemeToggle />
+
+          {status === 'checking' && (
+            <span aria-label="Checking session" className="ml-1 size-8 animate-pulse rounded-full bg-muted" />
+          )}
+
+          {signedIn && (
             <>
               <NotificationBell />
-              <Link
-                href="/account"
-                title="Account"
-                className="hidden items-center justify-center rounded-full border-2 border-line bg-pink h-8 w-8 text-xs font-bold hover:brightness-95 sm:flex"
-              >
-                {user.name.charAt(0).toUpperCase()}
-              </Link>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="rounded-full border-2 border-line px-3 py-1.5 text-sm font-medium hover:bg-cream-2"
-              >
-                Log out
-              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  aria-label="Account menu"
+                  className="ml-1 flex size-8 items-center justify-center rounded-full border border-border-strong bg-surface text-xs font-semibold outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-primitive-ring"
+                >
+                  {user.name.charAt(0).toUpperCase()}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" sideOffset={8} className="min-w-52">
+                  <div className="px-2.5 py-2">
+                    <p className="truncate text-sm font-medium">{user.name}</p>
+                    <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+                  </div>
+                  <DropdownMenuSeparator />
+                  <div className="md:hidden">
+                    {links.map((link) => (
+                      <DropdownMenuItem key={link.href} render={<Link href={link.href} />}>
+                        {link.label}
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator />
+                  </div>
+                  <DropdownMenuItem render={<Link href="/account" />}>Account</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void handleLogout()}>
+                    <IconLogout aria-hidden className="size-4" stroke={1.6} />
+                    Log out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </>
           )}
+
           {status === 'anonymous' && (
-            <>
-              <Link href="/login" className="rounded-full px-3 py-1.5 text-sm font-medium hover:bg-cream-2">
-                Log in
-              </Link>
-              <Link
-                href="/register"
-                className="rounded-full border-2 border-line bg-yellow px-3 py-1.5 text-sm font-semibold shadow-hard-sm transition-transform hover:-translate-y-0.5"
-              >
-                Register
-              </Link>
-            </>
+            <div className="ml-1 flex items-center gap-1">
+              <div className="hidden sm:block">
+                <ButtonLink href="/login" variant="ghost" size="sm">
+                  Log in
+                </ButtonLink>
+              </div>
+              <ButtonLink href="/register" size="sm">
+                Sign up
+              </ButtonLink>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" aria-label="Menu" className="md:hidden">
+                    <IconMenu2 className="size-4.5" stroke={1.6} />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" sideOffset={8} className="min-w-44">
+                  {links.map((link) => (
+                    <DropdownMenuItem key={link.href} render={<Link href={link.href} />}>
+                      {link.label}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuItem render={<Link href="/login" />}>Log in</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           )}
         </div>
       </div>
+      <div aria-hidden className="rule-double" />
     </header>
   );
 }

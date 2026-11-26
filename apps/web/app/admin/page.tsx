@@ -11,14 +11,14 @@ import { AuditList } from './AuditList';
 
 function StatCard({ label, value, hint, href }: { label: string; value: string | number; hint?: string; href?: string }) {
   const body = (
-    <div className="h-full rounded-2xl border-2 border-line bg-white p-5 shadow-hard-sm">
-      <p className="text-xs font-semibold uppercase tracking-wide text-ink/60">{label}</p>
-      <p className="mt-1 font-display text-3xl font-extrabold">{value}</p>
-      {hint && <p className="mt-1 text-sm text-ink/60">{hint}</p>}
+    <div className="panel h-full p-5 transition-colors group-hover:border-border-strong">
+      <p className="eyebrow">{label}</p>
+      <p className="figures mt-2 text-4xl">{value}</p>
+      {hint && <p className="mt-1 text-sm text-muted-foreground">{hint}</p>}
     </div>
   );
   return href ? (
-    <Link href={href} className="block transition-transform hover:-translate-y-0.5">
+    <Link href={href} className="group block">
       {body}
     </Link>
   ) : (
@@ -63,7 +63,7 @@ export default function AdminDashboardPage() {
           <Notice tone={queueIsStale ? 'error' : 'info'}>
             <strong>{awaitingReview}</strong> {awaitingReview === 1 ? 'listing is' : 'listings are'} waiting for your
             review. The oldest has waited {oldestLabel}.{queueIsStale && ' Sellers are waiting a long time.'}{' '}
-            <Link href="/admin/auctions?status=PENDING_REVIEW" className="font-semibold underline underline-offset-4">
+            <Link href="/admin/auctions?status=PENDING_REVIEW" className="font-medium underline underline-offset-4">
               Open the review queue
             </Link>
           </Notice>
@@ -75,7 +75,7 @@ export default function AdminDashboardPage() {
           <Notice tone="error">
             <strong>{s.needsRefund}</strong> {s.needsRefund === 1 ? 'order was' : 'orders were'} cancelled after the
             buyer’s payment succeeded. The money has not been returned.{' '}
-            <Link href="/admin/orders?needsRefund=true" className="font-semibold underline underline-offset-4">
+            <Link href="/admin/orders?needsRefund=true" className="font-medium underline underline-offset-4">
               Review them
             </Link>
           </Notice>
@@ -83,14 +83,14 @@ export default function AdminDashboardPage() {
       )}
 
       {stats.isLoading ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 8 }).map((_, i) => (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 9 }).map((_, i) => (
             <Skeleton key={i} className="h-28" />
           ))}
         </div>
       ) : (
         s && (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <StatCard
               label="Awaiting review"
               value={awaitingReview}
@@ -116,10 +116,10 @@ export default function AdminDashboardPage() {
 
       <section aria-labelledby="recent-heading" className="mt-10">
         <div className="mb-3 flex items-baseline justify-between">
-          <h2 id="recent-heading" className="font-display text-xl font-extrabold">
+          <h2 id="recent-heading" className="font-semibold tracking-tight">
             Recent admin activity
           </h2>
-          <Link href="/admin/audit-log" className="text-sm font-semibold underline underline-offset-4">
+          <Link href="/admin/audit-log" className="text-sm font-medium underline underline-offset-4">
             View all
           </Link>
         </div>

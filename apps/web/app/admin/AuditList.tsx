@@ -29,25 +29,25 @@ function describeChange(entry: AuditEntry): string {
 
 export function AuditList({ entries }: { entries: AuditEntry[] }) {
   if (entries.length === 0) {
-    return <p className="rounded-xl border-2 border-dashed border-line/30 p-4 text-sm text-ink/70">Nothing recorded yet.</p>;
+    return <p className="rounded-xl border border-dashed border-border-strong p-4 text-sm text-muted-foreground">Nothing recorded yet.</p>;
   }
   return (
-    <ul className="overflow-hidden rounded-2xl border-2 border-line bg-white">
+    <ul className="overflow-hidden panel">
       {entries.map((entry) => {
         const href = targetHref(entry);
         const change = describeChange(entry);
         return (
-          <li key={entry.id} className="border-b border-line/10 px-4 py-3 text-sm last:border-b-0">
+          <li key={entry.id} className="border-b border-border px-4 py-3 text-sm last:border-b-0">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <p className="font-semibold">
                 {ACTION_LABEL[entry.action] ?? entry.action}
-                {change && <span className="ml-2 font-normal text-ink/70">{change}</span>}
+                {change && <span className="ml-2 font-normal text-muted-foreground">{change}</span>}
               </p>
-              <time className="text-ink/60" dateTime={entry.createdAt}>
+              <time className="text-muted-foreground" dateTime={entry.createdAt}>
                 {new Date(entry.createdAt).toLocaleString()}
               </time>
             </div>
-            <p className="mt-0.5 text-ink/70">
+            <p className="mt-0.5 text-muted-foreground">
               {entry.targetType}{' '}
               {href ? (
                 <Link href={href} className="underline underline-offset-4">
@@ -59,7 +59,7 @@ export function AuditList({ entries }: { entries: AuditEntry[] }) {
               {' · by '}
               {entry.actorId ? entry.actorId.slice(0, 8) : 'CLI'}
             </p>
-            {entry.reason && <p className="mt-1 text-ink/80">“{entry.reason}”</p>}
+            {entry.reason && <p className="mt-1 text-muted-foreground">“{entry.reason}”</p>}
           </li>
         );
       })}

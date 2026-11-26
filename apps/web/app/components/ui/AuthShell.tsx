@@ -1,12 +1,12 @@
 'use client';
 
-import type { ComponentProps, ReactNode } from 'react';
+import { IconEye, IconEyeOff } from '@tabler/icons-react';
+import type { ComponentProps, ReactNode, Ref } from 'react';
 import { useState } from 'react';
-import { Mascot } from '../Mascot';
-import { Field, inputClass } from './Field';
+import { Input } from '@/components/wensity/input';
 
-// Split layout shared by login and register: the form card on the left, a
-// friendly cream-2 panel on the right that collapses away below `lg`.
+// Layout shared by the auth screens: a quiet statement on the left (hidden
+// below `lg`) and one focused form card.
 export function AuthShell({
   title,
   subtitle,
@@ -23,31 +23,27 @@ export function AuthShell({
   children: ReactNode;
 }) {
   return (
-    <main className="mx-auto grid w-full max-w-6xl flex-1 items-center gap-10 px-6 py-10 lg:grid-cols-2 lg:py-16">
-      <div className="mx-auto w-full max-w-md rounded-2xl border-2 border-line bg-white p-6 shadow-hard sm:p-8">
-        <h1 className="font-display text-3xl font-extrabold tracking-tight">{title}</h1>
-        <p className="mt-1 text-ink/70">{subtitle}</p>
-        <div className="mt-6">{children}</div>
-        <p className="mt-6 border-t-2 border-line/10 pt-4 text-sm text-ink/70">{footer}</p>
-      </div>
-
-      <aside className="bg-grid hidden flex-col items-start gap-6 rounded-2xl border-2 border-line bg-cream-2 p-10 lg:flex">
-        <Mascot className="h-28 w-28" />
-        <h2 className="font-display text-3xl font-extrabold leading-tight">{panelTitle}</h2>
-        <ul className="flex flex-col gap-3">
-          {panelPoints.map((point) => (
-            <li key={point} className="flex items-start gap-3">
-              <span
-                aria-hidden
-                className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-line bg-green text-[11px] font-extrabold leading-none"
-              >
-                &#10003;
+    <main className="mx-auto grid w-full max-w-5xl flex-1 items-center gap-16 px-6 py-12 lg:grid-cols-[1fr_26rem] lg:py-20">
+      <aside className="hidden lg:block">
+        <h2 className="max-w-md text-5xl font-medium leading-[1.06] tracking-tight">{panelTitle}</h2>
+        <ol className="mt-10 border-t-2 border-foreground">
+          {panelPoints.map((point, i) => (
+            <li key={point} className="flex items-baseline gap-5 border-b border-border py-4">
+              <span aria-hidden className="w-6 font-serif text-xl italic text-accent">
+                {['i.', 'ii.', 'iii.', 'iv.', 'v.'][i]}
               </span>
-              {point}
+              <span className="text-sm">{point}</span>
             </li>
           ))}
-        </ul>
+        </ol>
       </aside>
+
+      <div className="panel mx-auto w-full max-w-md border-t-[3px] border-t-foreground p-6 sm:p-8">
+        <h1 className="text-3xl font-medium tracking-tight">{title}</h1>
+        <p className="mt-1.5 text-sm text-muted-foreground">{subtitle}</p>
+        <div className="mt-6">{children}</div>
+        <p className="mt-6 border-t border-border pt-5 text-center text-sm text-muted-foreground">{footer}</p>
+      </div>
     </main>
   );
 }
@@ -58,28 +54,31 @@ export function PasswordField({
   hint,
   id,
   ...props
-}: Omit<ComponentProps<'input'>, 'type'> & { label: string; error?: string; hint?: string; id: string }) {
+}: Omit<ComponentProps<'input'>, 'type' | 'size' | 'ref'> & {
+  label: string;
+  error?: string;
+  hint?: string;
+  id: string;
+  ref?: Ref<HTMLInputElement>;
+}) {
   const [visible, setVisible] = useState(false);
   return (
-    <Field label={label} htmlFor={id} error={error} hint={hint}>
-      <div className="relative">
-        <input
-          id={id}
-          type={visible ? 'text' : 'password'}
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
-          className={`${inputClass(!!error)} pr-16`}
-          {...props}
-        />
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between">
+        <label htmlFor={id} className="text-[13px] font-medium leading-none">
+          {label}
+        </label>
         <button
           type="button"
           onClick={() => setVisible((v) => !v)}
           aria-pressed={visible}
-          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full px-2.5 py-1 text-xs font-semibold hover:bg-cream-2"
+          aria-label={visible ? 'Hide password' : 'Show password'}
+          className="-my-1 rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground"
         >
-          {visible ? 'Hide' : 'Show'}
+          {visible ? <IconEyeOff className="size-4" stroke={1.6} /> : <IconEye className="size-4" stroke={1.6} />}
         </button>
       </div>
-    </Field>
+      <Input id={id} inputSize="lg" type={visible ? 'text' : 'password'} error={error} hint={hint} {...props} />
+    </div>
   );
 }

@@ -22,13 +22,13 @@ export function DeliveryCodePanel({ order, accessToken }: { order: Order; access
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="rounded-xl border-2 border-line bg-yellow p-4 text-center">
-        <p className="text-xs font-semibold uppercase tracking-wide">Your delivery code</p>
-        <p aria-label={`Delivery code ${order.deliveryCode ?? ''}`} className="font-mono text-4xl font-extrabold tracking-[0.3em]">
+      <div className="rounded-xl border border-accent/30 bg-accent-soft p-4 text-center">
+        <p className="eyebrow">Your delivery code</p>
+        <p aria-label={`Delivery code ${order.deliveryCode ?? ''}`} className="font-mono text-4xl font-semibold tracking-[0.3em]">
           {order.deliveryCode ?? '------'}
         </p>
       </div>
-      <p className="text-sm text-ink/70">
+      <p className="text-sm text-muted-foreground">
         Give this code to the courier or seller <strong>only when the parcel is in your hands</strong>. They enter it to
         complete the delivery. Never share it before that.
       </p>
@@ -82,7 +82,7 @@ export function DeliveryCodeForm({ order, accessToken }: { order: Order; accessT
 
   return (
     <form onSubmit={handleSubmit((values) => confirm.mutate(values))} noValidate className="flex flex-col gap-3">
-      <p className="text-sm text-ink/70">
+      <p className="text-sm text-muted-foreground">
         Shipped. When the buyer has the parcel, ask for their 6-digit delivery code and enter it to complete the order.
       </p>
       <Field label="Buyer’s delivery code" htmlFor="delivery-code" error={errors.code?.message}>

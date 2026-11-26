@@ -7,6 +7,7 @@ import { listUsersRequest, setTrustedSellerRequest, setUserStatusRequest } from 
 import { ApiError } from '@/lib/apiClient';
 import type { AdminUser, UserRole, UserStatus } from '@/lib/types/admin';
 import { useDebouncedValue } from '@/lib/useDebouncedValue';
+import { NativeSelect } from '@/components/wensity/native-select';
 import { useAuthStore } from '@/store/authStore';
 import { Button } from '../../components/ui/Button';
 import { inputClass } from '../../components/ui/Field';
@@ -14,9 +15,9 @@ import { PageHeader, PageMessage, Skeleton } from '../../components/ui/Page';
 import { ReasonForm } from '../ReasonForm';
 
 const STATUS_STYLE: Record<UserStatus, string> = {
-  ACTIVE: 'bg-green',
-  SUSPENDED: 'bg-yellow',
-  BANNED: 'bg-pink',
+  ACTIVE: 'text-live',
+  SUSPENDED: 'text-accent',
+  BANNED: 'text-urgent',
 };
 
 type Pending = { userId: string; status: UserStatus };
@@ -47,29 +48,29 @@ function UserRow({ user, selfId, accessToken }: { user: AdminUser; selfId: strin
   const protectedAccount = user.role === 'ADMIN' || user.id === selfId;
 
   return (
-    <li className="border-b border-line/10 px-4 py-3 last:border-b-0">
+    <li className="border-b border-border px-4 py-3 last:border-b-0">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate font-display font-bold">
+          <p className="truncate font-medium">
             {user.name}
             {user.role === 'ADMIN' && (
-              <span className="ml-2 rounded-full border-2 border-line bg-cyan px-2 text-[11px] font-bold">Admin</span>
+              <span className="ml-2 rounded-md border border-border-strong px-1.5 py-0.5 text-[11px] font-medium">Admin</span>
             )}
             {user.trustedSeller && (
-              <span className="ml-2 rounded-full border-2 border-line bg-green px-2 text-[11px] font-bold">
+              <span className="ml-2 rounded-md border border-border-strong px-1.5 py-0.5 text-[11px] font-medium text-live">
                 Trusted seller
               </span>
             )}
-            {user.id === selfId && <span className="ml-2 text-xs font-normal text-ink/60">(you)</span>}
+            {user.id === selfId && <span className="ml-2 text-xs font-normal text-muted-foreground">(you)</span>}
           </p>
-          <p className="truncate text-sm text-ink/70">
+          <p className="truncate text-sm text-muted-foreground">
             {user.email} · joined {new Date(user.createdAt).toLocaleDateString()}
             {!user.emailVerifiedAt && ' · email unverified'}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span
-            className={`rounded-full border-2 border-line px-2.5 py-0.5 text-xs font-semibold ${STATUS_STYLE[user.status]}`}
+            className={`rounded-full border border-border px-2.5 py-0.5 text-xs font-semibold ${STATUS_STYLE[user.status]}`}
           >
             {user.status}
           </span>
@@ -170,27 +171,27 @@ function UsersList() {
           onChange={(e) => setSearch(e.target.value)}
           className={inputClass(false)}
         />
-        <select
+        <NativeSelect
           aria-label="Filter by role"
           value={role}
           onChange={(e) => setRole(e.target.value as UserRole | '')}
-          className={inputClass(false)}
+          selectSize="lg"
         >
           <option value="">All roles</option>
           <option value="USER">Users</option>
           <option value="ADMIN">Admins</option>
-        </select>
-        <select
+        </NativeSelect>
+        <NativeSelect
           aria-label="Filter by status"
           value={status}
           onChange={(e) => setStatus(e.target.value as UserStatus | '')}
-          className={inputClass(false)}
+          selectSize="lg"
         >
           <option value="">All statuses</option>
           <option value="ACTIVE">Active</option>
           <option value="SUSPENDED">Suspended</option>
           <option value="BANNED">Banned</option>
-        </select>
+        </NativeSelect>
       </div>
 
       {query.isLoading && (
@@ -205,7 +206,7 @@ function UsersList() {
         <PageMessage title="No users match" body="Try a different search or filter." />
       )}
       {users.length > 0 && (
-        <ul className="overflow-hidden rounded-2xl border-2 border-line bg-white">
+        <ul className="overflow-hidden panel">
           {users.map((user) => (
             <UserRow key={user.id} user={user} selfId={selfId} accessToken={accessToken} />
           ))}

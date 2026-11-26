@@ -35,8 +35,8 @@ export function ValuationPanel({ auctionId, accessToken }: { auctionId: string; 
 
   if (valuationQuery.isLoading) {
     return (
-      <div className="rounded-2xl border-2 border-line bg-cream-2 p-5 shadow-hard-sm">
-        <p className="text-sm text-ink/60">Loading AI valuation…</p>
+      <div className="rounded-2xl border border-border bg-surface-muted p-5">
+        <p className="text-sm text-muted-foreground">Loading AI valuation…</p>
       </div>
     );
   }
@@ -52,9 +52,9 @@ export function ValuationPanel({ auctionId, accessToken }: { auctionId: string; 
   const regenerateError = regenerate.error instanceof ApiError ? regenerate.error.message : null;
 
   return (
-    <div className="rounded-2xl border-2 border-line bg-cream-2 p-5 shadow-hard-sm">
+    <div className="rounded-2xl border border-border bg-surface-muted p-5">
       <div className="mb-3 flex items-center justify-between gap-2">
-        <h2 className="font-display text-lg font-extrabold">AI Valuation</h2>
+        <h2 className="text-lg font-semibold">AI Valuation</h2>
         <ValuationStatusPill status={valuation.status} />
       </div>
 
@@ -74,21 +74,21 @@ export function ValuationPanel({ auctionId, accessToken }: { auctionId: string; 
       {valuation.status === 'COMPLETE' && (
         <div className="flex flex-col gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-ink/60">Estimated value</p>
-            <p className="font-display text-3xl font-extrabold">{formatCents(valuation.estimatedValueCents ?? 0)}</p>
-            <p className="text-sm text-ink/70">
+            <p className="eyebrow">Estimated value</p>
+            <p className="figures text-4xl">{formatCents(valuation.estimatedValueCents ?? 0)}</p>
+            <p className="text-sm text-muted-foreground">
               Range: {formatCents(valuation.priceRangeLowCents ?? 0)} – {formatCents(valuation.priceRangeHighCents ?? 0)}
               {valuation.confidence !== null && (
                 <> · {Math.round(valuation.confidence * 100)}% confidence</>
               )}
             </p>
           </div>
-          {valuation.explanation && <p className="text-sm text-ink/80">{valuation.explanation}</p>}
+          {valuation.explanation && <p className="text-sm text-muted-foreground">{valuation.explanation}</p>}
           {/* Not hedging language for its own sake — a real, disclosed
               accuracy limit of a small self-hosted model (ADR-0032), the
               same caveat this project's own docs state plainly rather than
               hide. */}
-          <p className="text-xs text-ink/50">
+          <p className="text-xs text-muted-foreground">
             Rough AI estimate from a free, self-hosted model — a starting point, not an appraisal.
           </p>
           {regenerateError && <Notice tone="error">{regenerateError}</Notice>}

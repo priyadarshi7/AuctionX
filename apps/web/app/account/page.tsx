@@ -47,9 +47,9 @@ export default function AccountPage() {
     <main className="mx-auto w-full max-w-2xl flex-1 px-6 py-10">
       <PageHeader title="Account" subtitle={user.email} />
 
-      <section className="rounded-2xl border-2 border-line bg-white p-6 shadow-hard-sm">
-        <h2 className="font-display text-lg font-bold text-red-700">Delete account</h2>
-        <p className="mt-2 text-sm text-ink/70">
+      <section className="panel p-6">
+        <h2 className="font-semibold tracking-tight text-urgent">Delete account</h2>
+        <p className="mt-2 text-sm text-muted-foreground">
           Permanently deletes your account, along with any of your own auctions that never
           received a bid. Only blocked if you&apos;ve ever placed a bid, received a bid on one of
           your auctions, or had an order — those are kept as permanent records and can&apos;t be
@@ -69,7 +69,7 @@ export default function AccountPage() {
         <div className="mt-4">
           {confirming ? (
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-semibold">
+              <span className="text-sm font-medium">
                 This can&apos;t be undone. Delete your account?
               </span>
               <Button

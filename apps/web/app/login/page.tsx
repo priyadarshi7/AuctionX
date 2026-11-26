@@ -47,7 +47,7 @@ export default function LoginPage() {
       footer={
         <>
           New here?{' '}
-          <Link href="/register" className="font-semibold text-ink underline underline-offset-4">
+          <Link href="/register" className="font-medium text-foreground underline underline-offset-4">
             Create an account
           </Link>
         </>
@@ -77,7 +77,7 @@ export default function LoginPage() {
         />
         <Link
           href="/forgot-password"
-          className="-mt-2 self-end text-sm font-semibold text-ink/70 underline underline-offset-4 hover:text-ink"
+          className="-mt-2 self-end text-sm font-medium text-muted-foreground underline underline-offset-4 hover:text-foreground"
         >
           Forgot password?
         </Link>

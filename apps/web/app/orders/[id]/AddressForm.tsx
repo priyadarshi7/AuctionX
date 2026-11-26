@@ -88,9 +88,9 @@ export function AddressForm({
 
   if (address && !editing) {
     return (
-      <div className="rounded-xl border-2 border-line bg-cream-2 p-4">
+      <div className="rounded-xl border border-border bg-surface-muted p-4">
         <div className="mb-1 flex items-center justify-between gap-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink/60">Delivering to</p>
+          <p className="eyebrow">Delivering to</p>
           <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>
             Edit
           </Button>
@@ -115,7 +115,7 @@ export function AddressForm({
 
   return (
     <form onSubmit={handleSubmit((values) => save.mutate(values))} noValidate className="flex flex-col gap-3">
-      <p className="text-sm text-ink/70">Where should the seller send it? You need this before you can pay.</p>
+      <p className="text-sm text-muted-foreground">Where should the seller send it? You need this before you can pay.</p>
       {field('fullName', 'Full name', { autoComplete: 'name' })}
       {field('line1', 'Street address', { autoComplete: 'address-line1' })}
       {field('line2', 'Apartment, suite, etc. (optional)', { autoComplete: 'address-line2' })}

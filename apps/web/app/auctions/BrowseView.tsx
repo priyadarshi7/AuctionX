@@ -1,17 +1,22 @@
 'use client';
 
+import { IconLayoutGrid, IconList, IconPlugConnectedX, IconSearch, IconSearchOff } from '@tabler/icons-react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Input } from '@/components/wensity/input';
+import { NativeSelect } from '@/components/wensity/native-select';
+import { Tabs, TabsList, TabsTrigger } from '@/components/wensity/tabs';
 import { ApiError } from '@/lib/apiClient';
 import { listAuctionsRequest } from '@/lib/auctions';
-import { CATEGORY_DISPLAY, CATEGORY_ORDER, THEME_CLASSES } from '@/lib/categoryDisplay';
+import { CATEGORY_DISPLAY } from '@/lib/categoryDisplay';
 import { searchAuctionsRequest, type SearchAuctionResult } from '@/lib/search';
 import type { AuctionCategory, AuctionStatus } from '@/lib/types/auction';
 import { AuctionCard } from '../components/AuctionCard';
 import { AuctionCardSkeleton } from '../components/AuctionCardSkeleton';
+import { CategoryFilter } from '../components/CategoryFilter';
+import { LotLedger } from '../components/LotLedger';
 import { Button, ButtonLink } from '../components/ui/Button';
-import { inputClass } from '../components/ui/Field';
 import { PageHeader, PageMessage } from '../components/ui/Page';
 
 // ---- URL <-> filter state ------------------------------------------------
@@ -72,14 +77,23 @@ export function BrowseView() {
   const statusId = parseStatus(searchParams.get('status'));
   const sort = parseSort(searchParams.get('sort'));
   const urlQuery = searchParams.get('q') ?? '';
+  // Plates (photo grid) by default; the ledger is the dense, comparable list.
+  const view = searchParams.get('view') === 'ledger' ? 'ledger' : 'plates';
 
   const [query, setQuery] = useState(urlQuery);
+  // The search palette can change ?q= while this page is already open, so the
+  // box follows the URL when the URL moves on its own.
+  const [seenUrlQuery, setSeenUrlQuery] = useState(urlQuery);
+  if (seenUrlQuery !== urlQuery) {
+    setSeenUrlQuery(urlQuery);
+    if (query.trim() !== urlQuery) setQuery(urlQuery);
+  }
 
   const setParams = useCallback(
     (changes: Record<string, string>) => {
       const next = new URLSearchParams(searchParams.toString());
       for (const [key, value] of Object.entries(changes)) {
-        if (value === '' || value === 'all' || value === 'newest') next.delete(key);
+        if (value === '' || value === 'all' || value === 'newest' || value === 'plates') next.delete(key);
         else next.set(key, value);
       }
       const qs = next.toString();
@@ -90,7 +104,7 @@ export function BrowseView() {
 
   // Debounced write of the search box to the URL.
   useEffect(() => {
-    if (query === urlQuery) return;
+    if (query.trim() === urlQuery) return;
     const timer = setTimeout(() => setParams({ q: query.trim() }), 300);
     return () => clearTimeout(timer);
   }, [query, urlQuery, setParams]);
@@ -184,105 +198,86 @@ export function BrowseView() {
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-10">
       <PageHeader
-        title="Browse auctions"
-        subtitle="Find something rare, watch it live, and bid before the clock runs out."
+        title="The catalogue"
+        subtitle="Read it by department, watch a lot, bid before the clock runs out."
       />
 
       {/* Toolbar */}
-      <div className="mb-6 flex flex-col gap-4 rounded-2xl border-2 border-line bg-white p-4 shadow-hard-sm">
+      <div className="mb-6 flex flex-col gap-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-center">
-          <div className="relative flex-1">
+          <div className="flex-1">
             <label htmlFor="browse-search" className="sr-only">
               Search auctions by title or description
             </label>
-            <span aria-hidden className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink/60">
-              &#9906;
-            </span>
-            <input
+            <Input
               id="browse-search"
               type="search"
+              inputSize="lg"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search auctions — try a keyword from the title or description"
+              placeholder="Search titles and descriptions"
               autoComplete="off"
-              className={`${inputClass(false)} pl-9`}
+              leftIcon={<IconSearch stroke={1.6} />}
+              inputClassName="[&::-webkit-search-cancel-button]:hidden"
+              clearable
+              onClear={() => setQuery('')}
             />
           </div>
 
-          <div role="group" aria-label="Auction status" className="flex rounded-full border-2 border-line bg-cream p-1">
-            {STATUS_OPTIONS.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                aria-pressed={statusId === s.id}
-                onClick={() => setParams({ status: s.id })}
-                className={`rounded-full px-3.5 py-1 text-sm font-semibold transition-colors ${
-                  statusId === s.id ? 'bg-yellow' : 'hover:bg-cream-2'
-                }`}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Tabs variant="segmented" value={statusId} onValueChange={(next) => setParams({ status: next })}>
+              <TabsList aria-label="Auction status">
+                {STATUS_OPTIONS.map((option) => (
+                  <TabsTrigger key={option.id} value={option.id}>
+                    {option.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
 
-          <div>
-            <label htmlFor="browse-sort" className="sr-only">
-              Sort auctions
-            </label>
-            <select
-              id="browse-sort"
+            <div role="group" aria-label="Layout" className="flex border border-border">
+              {(
+                [
+                  { id: 'plates', label: 'Plates', icon: IconLayoutGrid },
+                  { id: 'ledger', label: 'Ledger', icon: IconList },
+                ] as const
+              ).map(({ id, label, icon: ViewIcon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={view === id}
+                  aria-label={`${label} view`}
+                  title={`${label} view`}
+                  onClick={() => setParams({ view: id })}
+                  className={`flex size-[calc(var(--primitive-control-height-lg)-2px)] items-center justify-center transition-colors ${
+                    view === id ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <ViewIcon aria-hidden className="size-4" stroke={1.5} />
+                </button>
+              ))}
+            </div>
+
+            <NativeSelect
+              aria-label="Sort auctions"
+              selectSize="lg"
+              fullWidth={false}
               value={sort}
               onChange={(event) => setParams({ sort: event.target.value })}
-              className={`${inputClass(false)} w-full py-2 text-sm md:w-auto`}
-            >
-              {SORT_OPTIONS.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
+              options={SORT_OPTIONS.map((option) => ({ value: option.id, label: option.label }))}
+            />
           </div>
         </div>
 
-        <div
-          role="group"
-          aria-label="Filter by category"
-          className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:px-0"
-        >
-          <button
-            type="button"
-            aria-pressed={category === ''}
-            onClick={() => setParams({ category: '' })}
-            className={`shrink-0 rounded-full border-2 border-line px-4 py-1.5 text-sm font-semibold transition-colors ${
-              category === '' ? 'bg-ink text-cream' : 'bg-white hover:bg-cream-2'
-            }`}
-          >
-            All categories
-          </button>
-          {CATEGORY_ORDER.map((c) => {
-            const display = CATEGORY_DISPLAY[c];
-            const theme = THEME_CLASSES[display.theme];
-            const active = category === c;
-            return (
-              <button
-                key={c}
-                type="button"
-                aria-pressed={active}
-                onClick={() => setParams({ category: active ? '' : c })}
-                className={`shrink-0 rounded-full border-2 border-line px-4 py-1.5 text-sm font-semibold transition-colors ${
-                  active ? `${theme.bg} ${theme.text}` : 'bg-white hover:bg-cream-2'
-                }`}
-              >
-                {display.emoji} {display.label}
-              </button>
-            );
-          })}
-        </div>
+        <CategoryFilter value={category} onChange={(next) => setParams({ category: next })} label="Filter by department" />
       </div>
 
       {/* Result summary */}
-      <div className="mb-4 flex min-h-6 flex-wrap items-center justify-between gap-2 text-sm" aria-live="polite">
-        <p className="text-ink/70">
+      <div
+        className="mb-5 flex min-h-6 flex-wrap items-center justify-between gap-2 text-sm"
+        aria-live="polite"
+      >
+        <p className="text-muted-foreground">
           {isLoading
             ? 'Loading auctions…'
             : (() => {
@@ -292,21 +287,21 @@ export function BrowseView() {
                 // "at least this many," via the one-extra-row keyset trick).
                 const count = searchTotal ?? visible.length;
                 const approximate = searchTotal === undefined && hasNextPage;
-                return `${count}${approximate ? '+' : ''} ${count === 1 ? 'auction' : 'auctions'}${
+                return `${count}${approximate ? '+' : ''} ${count === 1 ? 'lot' : 'lots'}${
                   hasQuery ? ` for "${urlQuery}"` : category ? ` in ${CATEGORY_DISPLAY[category].label}` : ''
                 }`;
               })()}
-          {localOnly && ' · sort applies to the auctions loaded so far'}
+          {localOnly && ' · sort applies to the lots loaded so far'}
         </p>
         {filtersActive && (
-          <button type="button" onClick={clearAll} className="font-semibold underline underline-offset-4">
+          <button type="button" onClick={clearAll} className="text-foreground underline-offset-4 hover:underline">
             Clear all filters
           </button>
         )}
       </div>
 
       {isLoading && (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4" aria-busy="true">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-4" aria-busy="true">
           {Array.from({ length: 8 }, (_, i) => (
             <AuctionCardSkeleton key={i} />
           ))}
@@ -315,6 +310,7 @@ export function BrowseView() {
 
       {isError && (
         <PageMessage
+          icon={IconPlugConnectedX}
           title={searchUnavailable ? 'Search is temporarily unavailable' : "Couldn't load auctions"}
           body={
             searchUnavailable
@@ -338,7 +334,7 @@ export function BrowseView() {
 
       {!isLoading && !isError && visible.length === 0 && (
         <PageMessage
-          mascotColor="#f5c94b"
+          icon={IconSearchOff}
           title={filtersActive ? 'Nothing matches those filters' : 'No auctions yet'}
           body={
             filtersActive
@@ -368,16 +364,19 @@ export function BrowseView() {
         />
       )}
 
-      {visible.length > 0 && (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-          {visible.map((auction) => (
-            <AuctionCard key={auction.id} auction={auction} />
-          ))}
-        </div>
-      )}
+      {visible.length > 0 &&
+        (view === 'ledger' ? (
+          <LotLedger auctions={visible} />
+        ) : (
+          <div className="grid grid-cols-2 gap-x-4 gap-y-10 sm:gap-x-6 md:grid-cols-3 lg:grid-cols-4">
+            {visible.map((auction) => (
+              <AuctionCard key={auction.id} auction={auction} />
+            ))}
+          </div>
+        ))}
 
       {isFetchingNextPage && (
-        <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4" aria-busy="true">
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-4" aria-busy="true">
           {Array.from({ length: 4 }, (_, i) => (
             <AuctionCardSkeleton key={i} />
           ))}
@@ -393,7 +392,7 @@ export function BrowseView() {
       )}
 
       {!hasNextPage && !isLoading && !isError && loaded.length > 0 && (
-        <p className="mt-8 text-center text-sm text-ink/60">You&apos;ve seen everything. Check back soon.</p>
+        <p className="mt-12 text-center font-serif text-lg italic text-muted-foreground">End of catalogue.</p>
       )}
     </main>
   );

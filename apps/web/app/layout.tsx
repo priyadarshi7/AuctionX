@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
-import { Geist, Bricolage_Grotesque, Caveat } from "next/font/google";
+import { Geist, Geist_Mono, Newsreader } from "next/font/google";
+import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import { NavBar } from "./NavBar";
 import { Providers } from "./providers";
 import { VerificationBanner } from "./components/VerificationBanner";
 import { TestModeBanner } from "./components/TestModeBanner";
+import { Colophon } from "./components/Colophon";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -11,20 +13,19 @@ const geistSans = Geist({
   subsets: ["latin"],
 });
 
-// Big bold display type for headlines/logo — the "PRODUCT INTERFACES" /
-// "PANKAJ" scale type in the reference design. Not used for body copy.
-const bricolage = Bricolage_Grotesque({
-  variable: "--font-display",
+// Headings, lot titles, prices and clocks. `opsz` lets one family look right
+// from 12px captions to 60px headlines.
+const newsreader = Newsreader({
+  variable: "--font-newsreader",
   subsets: ["latin"],
-  weight: ["500", "700", "800"],
+  style: ["normal", "italic"],
+  axes: ["opsz"],
 });
 
-// Handwritten accent font for sticky-note style annotations only — never
-// body copy or anything that needs to stay easily legible/accessible.
-const caveat = Caveat({
-  variable: "--font-hand",
+// Reference codes and keyboard hints.
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
   subsets: ["latin"],
-  weight: ["500", "700"],
 });
 
 export const metadata: Metadata = {
@@ -36,14 +37,19 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${bricolage.variable} ${caveat.variable} h-full antialiased`}
+      className={`dark ${geistSans.variable} ${geistMono.variable} ${newsreader.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col bg-cream text-ink">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
+      <body className="flex min-h-full flex-col">
         <Providers>
           <TestModeBanner />
           <NavBar />
           <VerificationBanner />
           {children}
+          <Colophon />
         </Providers>
       </body>
     </html>

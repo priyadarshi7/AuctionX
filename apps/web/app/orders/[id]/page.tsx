@@ -71,18 +71,22 @@ function Timeline({ order }: { order: Order }) {
         <li key={step.label} className="flex items-start gap-4">
           <span
             aria-hidden
-            className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-line text-sm font-extrabold ${
-              step.state === 'done' ? 'bg-green' : step.state === 'current' ? 'bg-yellow' : 'bg-white text-ink/50'
+            className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border font-mono text-xs ${
+              step.state === 'done'
+                ? 'border-foreground bg-foreground text-background'
+                : step.state === 'current'
+                  ? 'border-accent bg-accent-soft text-accent'
+                  : 'border-border text-muted-foreground'
             }`}
           >
             {step.state === 'done' ? '✓' : i + 1}
           </span>
           <div>
-            <p className={`font-display font-bold ${step.state === 'todo' ? 'text-ink/60' : ''}`}>
+            <p className={`font-medium ${step.state === 'todo' ? 'text-muted-foreground' : ''}`}>
               {step.label}
               <span className="sr-only"> ({step.state === 'done' ? 'done' : step.state === 'current' ? 'in progress' : 'not started'})</span>
             </p>
-            <p className="text-sm text-ink/70">{step.detail}</p>
+            <p className="text-sm text-muted-foreground">{step.detail}</p>
           </div>
         </li>
       ))}
@@ -187,20 +191,20 @@ export default function OrderDetailPage() {
 
   return (
     <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-10">
-      <nav aria-label="Breadcrumb" className="mb-6 text-sm text-ink/70">
-        <Link href="/orders" className="font-semibold underline underline-offset-4">
+      <nav aria-label="Breadcrumb" className="mb-6 text-sm text-muted-foreground">
+        <Link href="/orders" className="transition-colors hover:text-foreground">
           Orders
         </Link>{' '}
         / Order {order.id.slice(0, 8)}
       </nav>
 
       <div className="grid gap-6 sm:grid-cols-[1fr_1.2fr]">
-        <div className="rounded-2xl border-2 border-line bg-white p-6 shadow-hard">
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink/60">Amount</p>
-          <p className="font-display text-4xl font-extrabold">{formatCents(order.amountCents)}</p>
+        <div className="panel p-6">
+          <p className="eyebrow">Amount</p>
+          <p className="figures mt-1 text-5xl">{formatCents(order.amountCents)}</p>
           <div className="mt-3 flex items-center gap-2">
             <OrderStatusPill status={order.status} />
-            <span className="text-sm text-ink/70">{isBuyer ? 'You are the buyer' : 'You are the seller'}</span>
+            <span className="text-sm text-muted-foreground">{isBuyer ? 'You are the buyer' : 'You are the seller'}</span>
           </div>
 
           <div className="mt-6 flex flex-col gap-3">
@@ -212,7 +216,7 @@ export default function OrderDetailPage() {
                 <Button onClick={() => pay.mutate()} disabled={paying || !order.shippingAddress} className="w-full">
                   {redirecting ? 'Taking you to secure payment…' : paying ? 'Processing…' : `Pay ${formatCents(order.amountCents)}`}
                 </Button>
-                {!order.shippingAddress && <p className="text-xs text-ink/60">Save your delivery address above to enable payment.</p>}
+                {!order.shippingAddress && <p className="text-xs text-muted-foreground">Save your delivery address above to enable payment.</p>}
                 {payError && <Notice tone="error">{payError}</Notice>}
                 {returned === 'cancelled' && !paying && (
                   <Notice tone="info">Payment was cancelled. Nothing was charged. You can try again.</Notice>
@@ -223,7 +227,7 @@ export default function OrderDetailPage() {
                 {paying && !redirecting && !payError && (
                   <Notice tone="info">Confirming your payment. This usually takes a moment.</Notice>
                 )}
-                <p className="text-xs text-ink/60">
+                <p className="text-xs text-muted-foreground">
                   Demo project: payments run in test mode and no real money moves. On the payment page use card{' '}
                   <strong>4242 4242 4242 4242</strong>, any future expiry date and any 3-digit CVC.
                 </p>
@@ -233,7 +237,7 @@ export default function OrderDetailPage() {
               <Notice tone="info">Waiting for the buyer to complete payment.</Notice>
             )}
             {isBuyer && order.status === 'PENDING_PAYMENT' && order.paymentDueAt && (
-              <p className="text-xs text-ink/60">
+              <p className="text-xs text-muted-foreground">
                 Pay by {new Date(order.paymentDueAt).toLocaleString()} or the order is cancelled.
               </p>
             )}
@@ -269,8 +273,8 @@ export default function OrderDetailPage() {
           </div>
         </div>
 
-        <div className="rounded-2xl border-2 border-line bg-cream-2 p-6">
-          <h2 className="mb-5 font-display text-xl font-extrabold">Progress</h2>
+        <div className="panel p-6">
+          <h2 className="mb-5 font-semibold tracking-tight">Progress</h2>
           <Timeline order={order} />
         </div>
       </div>

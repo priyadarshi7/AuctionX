@@ -1,5 +1,6 @@
 'use client';
 
+import { IconPhoto } from '@tabler/icons-react';
 import { useMutation } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useState } from 'react';
@@ -8,7 +9,6 @@ import { cancelAuctionRequest, pauseAuctionRequest, startAuctionRequest, withdra
 import { CATEGORY_DISPLAY } from '@/lib/categoryDisplay';
 import { formatCents } from '@/lib/format';
 import type { Auction } from '@/lib/types/auction';
-import { Mascot } from '../components/Mascot';
 import { Button, ButtonLink } from '../components/ui/Button';
 import { Notice } from '../components/ui/Notice';
 import { AuctionStatusPill } from '../components/ui/StatusPill';
@@ -65,7 +65,7 @@ export function AuctionRow({ auction, accessToken, onChanged }: Props) {
   const isDraft = auction.status === 'DRAFT';
   const cancelControl = confirmCancel ? (
     <span className="flex items-center gap-2">
-      <span className="text-sm font-semibold">
+      <span className="text-sm font-medium">
         {isDraft ? 'Delete this draft?' : 'Cancel this auction?'}
       </span>
       <Button variant="danger" size="sm" onClick={() => cancel.mutate()} disabled={pending}>
@@ -82,11 +82,11 @@ export function AuctionRow({ auction, accessToken, onChanged }: Props) {
   );
 
   return (
-    <li className="rounded-2xl border-2 border-line bg-white p-4 shadow-hard-sm">
+    <li className="panel p-4">
       <div className="flex items-center gap-4">
         <Link
           href={`/auctions/${auction.id}`}
-          className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border-2 border-line bg-cream-2"
+          className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-muted"
           aria-hidden
           tabIndex={-1}
         >
@@ -94,29 +94,29 @@ export function AuctionRow({ auction, accessToken, onChanged }: Props) {
             // eslint-disable-next-line @next/next/no-img-element
             <img src={auction.images[0]} alt="" className="h-full w-full object-cover" />
           ) : (
-            <Mascot className="h-10 w-10 opacity-70" />
+            <IconPhoto aria-hidden className="size-5 text-muted-foreground/60" stroke={1.3} />
           )}
         </Link>
 
         <div className="min-w-0 flex-1">
-          <Link href={`/auctions/${auction.id}`} className="block truncate font-display text-lg font-bold hover:underline">
+          <Link href={`/auctions/${auction.id}`} className="block truncate font-medium underline-offset-4 hover:underline">
             {auction.title}
           </Link>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-ink/70">
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             <AuctionStatusPill status={auction.status} />
             <span>
-              {display.emoji} {display.label}
+              {display.label}
             </span>
           </div>
         </div>
 
         <div className="text-right">
-          <p className="text-[11px] uppercase tracking-wide text-ink/60">
+          <p className="eyebrow">
             {auction.status === 'ACTIVE' ? 'Current bid' : 'Price'}
           </p>
           {/* DRAFT's currentPriceCents is a placeholder until the seller
               sets a real one on the auction's own page — see below. */}
-          <p className="whitespace-nowrap font-display text-lg font-extrabold">
+          <p className="figures whitespace-nowrap text-xl">
             {auction.status === 'DRAFT' || auction.status === 'PENDING_REVIEW'
               ? 'Not set yet'
               : formatCents(auction.currentPriceCents)}
@@ -129,7 +129,7 @@ export function AuctionRow({ auction, accessToken, onChanged }: Props) {
         auction.status === 'PUBLISHED' ||
         auction.status === 'ACTIVE' ||
         auction.status === 'PAUSED') && (
-        <div className="mt-4 flex flex-wrap items-center gap-2 border-t-2 border-line/10 pt-4">
+        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
           {/* Routes to the auction's own page rather than publishing
               inline — the AI valuation (ADR-0032) and real price entry
               (SetPriceAndPublishPanel) both live there now, since the
@@ -175,7 +175,7 @@ export function AuctionRow({ auction, accessToken, onChanged }: Props) {
           {auction.status === 'PAUSED' && (
             <>
               {auction.heldByAdmin ? (
-                <span className="text-sm font-semibold">Paused by a moderator</span>
+                <span className="text-sm font-medium">Paused by a moderator</span>
               ) : (
                 <Button size="sm" onClick={() => start.mutate()} disabled={pending}>
                   {start.isPending ? 'Resuming…' : 'Resume'}

@@ -29,10 +29,10 @@ export function ShipForm({
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm text-ink/70">The buyer has paid. Send the item to this address, then mark it as shipped.</p>
+      <p className="text-sm text-muted-foreground">The buyer has paid. Send the item to this address, then mark it as shipped.</p>
       {address ? (
-        <div className="rounded-xl border-2 border-line bg-cream-2 p-4">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink/60">Ship to</p>
+        <div className="rounded-xl border border-border bg-surface-muted p-4">
+          <p className="mb-1 eyebrow">Ship to</p>
           <AddressSummary address={address} />
         </div>
       ) : (

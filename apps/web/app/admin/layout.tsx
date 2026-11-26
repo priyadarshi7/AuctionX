@@ -40,7 +40,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">
-      <nav aria-label="Admin sections" className="mb-8 flex flex-wrap gap-2">
+      <nav aria-label="Admin sections" className="mb-8 flex gap-1 overflow-x-auto border-b border-border">
         {TABS.map((tab) => {
           const active = tab.href === '/admin' ? pathname === '/admin' : pathname.startsWith(tab.href);
           return (
@@ -48,8 +48,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               key={tab.href}
               href={tab.href}
               aria-current={active ? 'page' : undefined}
-              className={`rounded-full border-2 border-line px-4 py-1.5 text-sm font-semibold transition-colors ${
-                active ? 'bg-yellow shadow-hard-sm' : 'bg-white hover:bg-cream-2'
+              className={`-mb-px shrink-0 border-b-2 px-3 pb-2.5 text-sm transition-colors ${
+                active
+                  ? 'border-foreground font-medium text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
             >
               {tab.label}

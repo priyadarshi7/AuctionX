@@ -15,27 +15,27 @@ export function TrackingTimeline({ order }: { order: Order }) {
   if (events.length === 0) return null;
 
   return (
-    <section aria-labelledby="tracking-heading" className="rounded-2xl border-2 border-line bg-white p-6">
-      <h2 id="tracking-heading" className="font-display text-xl font-extrabold">
+    <section aria-labelledby="tracking-heading" className="panel p-6">
+      <h2 id="tracking-heading" className="font-semibold tracking-tight">
         Tracking
       </h2>
-      <p className="mb-4 mt-1 text-sm text-ink/70">
+      <p className="mb-4 mt-1 text-sm text-muted-foreground">
         {order.carrier} · <span className="font-mono">{order.trackingNumber}</span>
       </p>
       <ol className="flex flex-col">
         {events.map((event, i) => (
           <li key={event.id} className="flex gap-3">
             <div className="flex flex-col items-center">
-              <span aria-hidden className={`mt-1 h-3 w-3 shrink-0 rounded-full border-2 border-line ${i === 0 ? 'bg-green' : 'bg-white'}`} />
-              {i < events.length - 1 && <span aria-hidden className="w-0.5 grow bg-line/30" />}
+              <span aria-hidden className={`mt-1.5 size-2 shrink-0 rounded-full ${i === 0 ? 'bg-live' : 'bg-border-strong'}`} />
+              {i < events.length - 1 && <span aria-hidden className="mt-1.5 w-px grow bg-border" />}
             </div>
             <div className="pb-4">
               <p className="font-semibold">{TITLE[event.type]}</p>
-              <p className="text-sm text-ink/70">
+              <p className="text-sm text-muted-foreground">
                 {event.description}
                 {event.location ? ` · ${event.location}` : ''}
               </p>
-              <time className="text-xs text-ink/50" dateTime={event.occurredAt}>
+              <time className="text-xs text-muted-foreground" dateTime={event.occurredAt}>
                 {new Date(event.occurredAt).toLocaleString()}
               </time>
             </div>

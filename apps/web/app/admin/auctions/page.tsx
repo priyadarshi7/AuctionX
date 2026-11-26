@@ -13,6 +13,7 @@ import { formatCents } from '@/lib/format';
 import type { AdminAuction, ModerationAction } from '@/lib/types/admin';
 import type { AuctionStatus } from '@/lib/types/auction';
 import { useDebouncedValue } from '@/lib/useDebouncedValue';
+import { NativeSelect } from '@/components/wensity/native-select';
 import { useAuthStore } from '@/store/authStore';
 import { Button } from '../../components/ui/Button';
 import { inputClass } from '../../components/ui/Field';
@@ -51,31 +52,31 @@ function ReviewPanel({ auction, accessToken }: { auction: AdminAuction; accessTo
     : 'not set';
 
   return (
-    <div className="mt-3 rounded-xl border-2 border-line bg-cream-2 p-4 text-sm">
+    <div className="mt-3 rounded-xl border border-border bg-surface-muted p-4 text-sm">
       <div className="grid gap-4 md:grid-cols-[1fr_1fr]">
         <div>
-          <p className="font-display text-base font-bold">{auction.title}</p>
-          <p className="mt-0.5 text-ink/70">
-            {display.emoji} {display.label} · condition {auction.condition.toLowerCase().replace('_', ' ')}
+          <p className="text-base font-medium">{auction.title}</p>
+          <p className="mt-0.5 text-muted-foreground">
+            {display.label} · condition {auction.condition.toLowerCase().replace('_', ' ')}
           </p>
-          <p className="mt-2 whitespace-pre-wrap text-ink/90">{auction.description}</p>
+          <p className="mt-2 whitespace-pre-wrap text-foreground">{auction.description}</p>
           <dl className="mt-3 grid grid-cols-2 gap-2">
-            <div className="rounded-lg border-2 border-line bg-white p-2">
-              <dt className="text-xs text-ink/60">Starting price</dt>
-              <dd className="font-semibold">{formatCents(auction.startingPriceCents)}</dd>
+            <div className="rounded-lg border border-border bg-surface p-2">
+              <dt className="text-xs text-muted-foreground">Starting price</dt>
+              <dd className="figures text-lg">{formatCents(auction.startingPriceCents)}</dd>
             </div>
-            <div className="rounded-lg border-2 border-line bg-white p-2">
-              <dt className="text-xs text-ink/60">Reserve</dt>
-              <dd className="font-semibold">
+            <div className="rounded-lg border border-border bg-surface p-2">
+              <dt className="text-xs text-muted-foreground">Reserve</dt>
+              <dd className="figures text-lg">
                 {auction.reservePriceCents ? formatCents(auction.reservePriceCents) : 'None'}
               </dd>
             </div>
-            <div className="col-span-2 rounded-lg border-2 border-line bg-white p-2">
-              <dt className="text-xs text-ink/60">Will run for (starting at approval)</dt>
-              <dd className="font-semibold">{duration}</dd>
+            <div className="col-span-2 rounded-lg border border-border bg-surface p-2">
+              <dt className="text-xs text-muted-foreground">Will run for (starting at approval)</dt>
+              <dd className="figures text-lg">{duration}</dd>
             </div>
           </dl>
-          <p className="mt-2 text-ink/70">
+          <p className="mt-2 text-muted-foreground">
             Seller: {auction.sellerName} ({auction.sellerEmail})
             {auction.submittedAt && ` · submitted ${new Date(auction.submittedAt).toLocaleString()}`}
           </p>
@@ -86,12 +87,12 @@ function ReviewPanel({ auction, accessToken }: { auction: AdminAuction; accessTo
               {auction.images.map((src) => (
                 <a key={src} href={src} target="_blank" rel="noreferrer">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={src} alt="" className="h-24 w-24 rounded-lg border-2 border-line object-cover" />
+                  <img src={src} alt="" className="h-24 w-24 rounded-lg border border-border object-cover" />
                 </a>
               ))}
             </div>
           ) : (
-            <p className="text-ink/70">No photos.</p>
+            <p className="text-muted-foreground">No photos.</p>
           )}
           <h3 className="mb-1.5 mt-4 font-semibold">
             Documents{needsDocs ? ' (required for this category)' : ''}
@@ -126,13 +127,13 @@ function AuctionRow({ auction, accessToken }: { auction: AdminAuction; accessTok
   const isPending = auction.status === 'PENDING_REVIEW';
 
   return (
-    <li className="border-b border-line/10 px-4 py-3 last:border-b-0">
+    <li className="border-b border-border px-4 py-3 last:border-b-0">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <Link href={`/auctions/${auction.id}`} className="truncate font-display font-bold underline-offset-4 hover:underline">
+          <Link href={`/auctions/${auction.id}`} className="truncate font-medium underline-offset-4 hover:underline">
             {auction.title}
           </Link>
-          <p className="truncate text-sm text-ink/70">
+          <p className="truncate text-sm text-muted-foreground">
             by {auction.sellerEmail} · {formatCents(auction.currentPriceCents)} · {auction.bidCount}{' '}
             {auction.bidCount === 1 ? 'bid' : 'bids'}
             {auction.endTime && ` · ends ${new Date(auction.endTime).toLocaleString()}`}
@@ -234,11 +235,11 @@ function AuctionsList() {
           onChange={(e) => setSearch(e.target.value)}
           className={inputClass(false)}
         />
-        <select
+        <NativeSelect
           aria-label="Filter by status"
           value={status}
           onChange={(e) => setStatus(e.target.value as AuctionStatus | '')}
-          className={inputClass(false)}
+          selectSize="lg"
         >
           <option value="">All statuses</option>
           {STATUSES.map((s) => (
@@ -246,7 +247,7 @@ function AuctionsList() {
               {s === 'PENDING_REVIEW' ? 'Awaiting review' : s}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </div>
 
       {query.isLoading && (
@@ -264,7 +265,7 @@ function AuctionsList() {
         />
       )}
       {auctions.length > 0 && (
-        <ul className="overflow-hidden rounded-2xl border-2 border-line bg-white">
+        <ul className="overflow-hidden panel">
           {auctions.map((auction) => (
             <AuctionRow key={auction.id} auction={auction} accessToken={accessToken} />
           ))}

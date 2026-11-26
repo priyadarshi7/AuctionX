@@ -1,19 +1,23 @@
 'use client';
 
-import Link from 'next/link';
-import { useState } from 'react';
+import { Tabs, TabsList, TabsTrigger } from '@/components/wensity/tabs';
+import { ButtonLink } from '../ui/Button';
 
-type Role = 'buy' | 'sell';
+export type Role = 'buy' | 'sell';
 
-const STEPS: Record<Role, { title: string; body: string }[]> = {
+const CLAUSES: Record<Role, { title: string; body: string }[]> = {
   buy: [
     {
-      title: 'Find something you want',
-      body: 'Browse live auctions by category. Every card shows the current bid and the time left.',
+      title: 'Choose a lot',
+      body: 'Read the catalogue by department. Every lot shows the standing bid and the time left.',
     },
     {
       title: 'Bid in real time',
-      body: 'The server checks your bid against the true current price. Watchers see it the instant it lands, no refresh.',
+      body: 'The server checks your bid against the true current price. Watchers see it the moment it lands, with no refresh.',
+    },
+    {
+      title: 'The late-bid rule',
+      body: 'A valid bid in the last 30 seconds extends the auction by 30 seconds, so nobody wins by sniping.',
     },
     {
       title: 'Win and pay',
@@ -23,75 +27,68 @@ const STEPS: Record<Role, { title: string; body: string }[]> = {
   sell: [
     {
       title: 'List it',
-      body: 'Add photos, a description, the condition and a starting price. Keep it as a draft while you polish.',
+      body: 'Add photos, a description and the condition. Keep it as a draft while you polish.',
     },
     {
-      title: 'Go live',
-      body: 'Pick a duration and publish. A bid in the last seconds extends the clock, so late bidders can’t snipe.',
+      title: 'Set the price',
+      body: 'An AI estimate can inform your starting price. The decision stays yours.',
     },
     {
-      title: 'Get notified',
-      body: 'Outbid, won or sold: alerts land in-app the moment it happens. Track it all from My auctions.',
+      title: 'Review, then sale',
+      body: 'The listing is reviewed before it goes live. Late bids extend the clock.',
+    },
+    {
+      title: 'Follow the hammer',
+      body: 'Outbid, won or sold: alerts arrive in the app. Track everything from My auctions.',
     },
   ],
 };
 
-export function HowItWorks({ signedIn }: { signedIn: boolean }) {
-  const [role, setRole] = useState<Role>('buy');
-  const steps = STEPS[role];
+const NUMERALS = ['i.', 'ii.', 'iii.', 'iv.'];
 
+export function HowItWorks({
+  signedIn,
+  role,
+  onRoleChange: setRole,
+}: {
+  signedIn: boolean;
+  role: Role;
+  onRoleChange: (role: Role) => void;
+}) {
   return (
-    <section className="mx-auto max-w-6xl px-6 py-16">
-      <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
-        <h2 className="font-display text-3xl font-extrabold sm:text-4xl">How it works</h2>
-        <div role="tablist" aria-label="How it works for" className="flex rounded-full border-2 border-line bg-white p-1">
-          {(['buy', 'sell'] as const).map((r) => (
-            <button
-              key={r}
-              type="button"
-              role="tab"
-              id={`hiw-tab-${r}`}
-              aria-selected={role === r}
-              aria-controls="hiw-panel"
-              onClick={() => setRole(r)}
-              className={`rounded-full px-5 py-1.5 text-sm font-semibold transition-colors ${
-                role === r ? 'bg-yellow text-ink' : 'text-ink/70 hover:bg-cream-2'
-              }`}
-            >
-              {r === 'buy' ? 'I want to bid' : 'I want to sell'}
-            </button>
-          ))}
-        </div>
+    <section id="conditions" className="mx-auto max-w-6xl scroll-mt-24 px-4 py-14 sm:px-6">
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b-2 border-foreground pb-4">
+        <h2 className="text-3xl font-medium tracking-tight">Conditions of sale</h2>
+        <Tabs variant="segmented" value={role} onValueChange={(next) => setRole(next as Role)}>
+          <TabsList aria-label="Conditions for">
+            <TabsTrigger value="buy">For bidders</TabsTrigger>
+            <TabsTrigger value="sell">For sellers</TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
 
-      <div
-        id="hiw-panel"
-        role="tabpanel"
-        aria-labelledby={`hiw-tab-${role}`}
-        className="grid grid-cols-1 gap-4 sm:grid-cols-3"
-      >
-        {steps.map((step, i) => (
-          <div
-            key={`${role}-${i}`}
-            className="step-in rounded-2xl border-2 border-line bg-white p-5 shadow-hard-sm"
-            style={{ animationDelay: `${i * 80}ms` }}
-          >
-            <span className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-line bg-cyan font-display font-extrabold">
-              {i + 1}
+      <ol aria-live="polite" className="grid gap-x-14 md:grid-cols-2">
+        {CLAUSES[role].map((clause, i) => (
+          <li key={`${role}-${clause.title}`} className="flex gap-5 border-b border-border py-6">
+            <span aria-hidden className="w-8 shrink-0 font-serif text-2xl italic leading-none text-accent">
+              {NUMERALS[i]}
             </span>
-            <p className="mt-3 font-display text-lg font-bold">{step.title}</p>
-            <p className="mt-1 text-sm text-ink/70">{step.body}</p>
-          </div>
+            <div>
+              <h3 className="text-xl font-medium leading-none">{clause.title}</h3>
+              <p className="mt-2.5 text-sm leading-6 text-muted-foreground">{clause.body}</p>
+            </div>
+          </li>
         ))}
-      </div>
+      </ol>
 
       <div className="mt-6">
-        <Link
+        <ButtonLink
           href={role === 'buy' ? '/auctions' : signedIn ? '/auctions/new' : '/register'}
-          className="inline-block rounded-full border-2 border-line bg-yellow px-6 py-2.5 font-display font-bold shadow-hard-sm transition-transform hover:-translate-y-0.5"
+          variant="secondary"
+          size="sm"
         >
-          {role === 'buy' ? 'Start browsing' : signedIn ? 'List an item' : 'Create an account to sell'}
-        </Link>
+          {role === 'buy' ? 'Read the catalogue' : signedIn ? 'Sell an item' : 'Create an account to sell'}
+        </ButtonLink>
       </div>
     </section>
   );

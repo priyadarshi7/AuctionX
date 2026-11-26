@@ -1,8 +1,10 @@
 'use client';
 
+import { IconShoppingBag, IconTag } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useState } from 'react';
+import { Tabs, TabsList, TabsTrigger } from '@/components/wensity/tabs';
 import { listMyOrdersRequest } from '@/lib/orders';
 import { formatCents } from '@/lib/format';
 import { useRequireAuth } from '@/lib/useRequireAuth';
@@ -59,22 +61,15 @@ export default function OrdersPage() {
         }
       />
 
-      <div role="tablist" aria-label="Filter orders" className="mb-6 flex gap-2">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={filter === t.id}
-            onClick={() => setFilter(t.id)}
-            className={`rounded-full border-2 border-line px-4 py-1.5 text-sm font-semibold transition-colors ${
-              filter === t.id ? 'bg-ink text-cream' : 'bg-white hover:bg-cream-2'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <Tabs variant="segmented" value={filter} onValueChange={(next) => setFilter(next as Filter)} className="mb-6 items-start">
+        <TabsList aria-label="Filter orders">
+          {tabs.map((t) => (
+            <TabsTrigger key={t.id} value={t.id}>
+              {t.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
       {ordersQuery.isLoading && (
         <ul className="flex flex-col gap-3" aria-busy="true">
@@ -92,7 +87,6 @@ export default function OrdersPage() {
 
       {!ordersQuery.isLoading && !ordersQuery.isError && orders.length === 0 && (
         <PageMessage
-          mascotColor="#f5c94b"
           title={all.length === 0 ? 'No orders yet' : `No ${filter.toLowerCase()} orders`}
           body="Orders appear here once you win an auction or someone wins one of yours."
           action={all.length === 0 ? <ButtonLink href="/auctions">Browse auctions</ButtonLink> : undefined}
@@ -109,36 +103,35 @@ export default function OrdersPage() {
             <li key={order.id}>
               <Link
                 href={`/orders/${order.id}`}
-                className="group flex flex-wrap items-center justify-between gap-4 rounded-2xl border-2 border-line bg-white p-4 shadow-hard-sm transition-transform hover:-translate-y-0.5 hover:shadow-hard"
+                className="panel flex flex-wrap items-center justify-between gap-4 p-4 transition-colors hover:border-border-strong"
               >
                 <div className="flex items-center gap-4">
                   <span
-                    className={`flex h-12 w-12 items-center justify-center rounded-full border-2 border-line font-display text-sm font-extrabold ${
-                      buying ? 'bg-yellow' : 'bg-cyan'
-                    }`}
+                    aria-hidden
+                    className="flex size-10 items-center justify-center rounded-xl border border-border bg-surface-muted text-muted-foreground"
                   >
-                    {buying ? 'Buy' : 'Sell'}
+                    {buying ? <IconShoppingBag className="size-4.5" stroke={1.5} /> : <IconTag className="size-4.5" stroke={1.5} />}
                   </span>
                   <div>
-                    <p className="font-display text-lg font-bold">
+                    <p className="font-medium">
                       {buying ? 'You won an auction' : 'You sold an item'}
                     </p>
-                    <p className="text-sm text-ink/70">
+                    <p className="text-sm text-muted-foreground">
                       Order {order.id.slice(0, 8)} &middot; {new Date(order.createdAt).toLocaleDateString()}
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-4">
                   <OrderStatusPill status={order.status} />
-                  <p className="font-display text-xl font-extrabold">{formatCents(order.amountCents)}</p>
+                  <p className="figures text-xl">{formatCents(order.amountCents)}</p>
                   {needsPayment && (
-                    <span className="rounded-full border-2 border-line bg-yellow px-3 py-1 text-sm font-bold">Pay now</span>
+                    <span className="rounded-md bg-accent px-2 py-1 text-xs font-medium text-background">Pay now</span>
                   )}
                   {needsShipping && (
-                    <span className="rounded-full border-2 border-line bg-yellow px-3 py-1 text-sm font-bold">Ship now</span>
+                    <span className="rounded-md bg-accent px-2 py-1 text-xs font-medium text-background">Ship now</span>
                   )}
                   {needsConfirm && (
-                    <span className="rounded-full border-2 border-line bg-cyan px-3 py-1 text-sm font-bold">Confirm delivery</span>
+                    <span className="rounded-md bg-accent px-2 py-1 text-xs font-medium text-background">Confirm delivery</span>
                   )}
                 </div>
               </Link>

@@ -1,11 +1,13 @@
-import type { ComponentProps, ReactNode } from 'react';
+import type { ComponentProps, ReactNode, Ref } from 'react';
+import { Input } from '@/components/wensity/input';
+import { NativeSelect } from '@/components/wensity/native-select';
+import { Textarea } from '@/components/wensity/text-area';
 
-// One error treatment everywhere: a pink offset shadow on the control plus
-// a "!" message underneath. Colour is never the only signal — the message
-// text and icon carry it (and aria-invalid tells assistive tech).
+// For the few raw controls that need custom adornments (the bid amount, row
+// selects); everything else uses the Wensity fields below.
 export function inputClass(hasError: boolean): string {
-  return `w-full rounded-xl border-2 border-line bg-white px-3.5 py-2.5 text-base placeholder:text-ink/50 transition-shadow disabled:opacity-60 ${
-    hasError ? 'shadow-[3px_3px_0_0_var(--pink)]' : 'focus:shadow-hard-sm'
+  return `h-10 w-full rounded-xl border bg-surface px-3.5 text-sm text-foreground outline-none transition-colors placeholder:text-primitive-text-placeholder focus-visible:ring-2 focus-visible:ring-primitive-ring disabled:opacity-50 ${
+    hasError ? 'border-urgent' : 'border-border hover:border-border-strong'
   }`;
 }
 
@@ -23,24 +25,18 @@ export function Field({
   children: ReactNode;
 }) {
   return (
-    <div>
-      <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-semibold">
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={htmlFor} className="text-[13px] font-medium leading-none">
         {label}
       </label>
       {children}
       {hint && !error && (
-        <p id={`${htmlFor}-hint`} className="mt-1.5 text-sm text-ink/60">
+        <p id={`${htmlFor}-hint`} className="text-xs text-muted-foreground">
           {hint}
         </p>
       )}
       {error && (
-        <p id={`${htmlFor}-error`} className="mt-1.5 flex items-center gap-1.5 text-sm font-medium">
-          <span
-            aria-hidden
-            className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 border-line bg-pink text-[10px] font-extrabold leading-none"
-          >
-            !
-          </span>
+        <p id={`${htmlFor}-error`} className="text-xs text-urgent">
           {error}
         </p>
       )}
@@ -48,55 +44,24 @@ export function Field({
   );
 }
 
-type Shared = { label: string; error?: string; hint?: string };
+type Shared = { label: string; error?: string; hint?: string; id: string };
 
-export function TextField({ label, error, hint, id, className = '', ...props }: ComponentProps<'input'> & Shared & { id: string }) {
-  return (
-    <Field label={label} htmlFor={id} error={error} hint={hint}>
-      <input
-        id={id}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
-        className={`${inputClass(!!error)} ${className}`}
-        {...props}
-      />
-    </Field>
-  );
+export function TextField(
+  props: Omit<ComponentProps<'input'>, 'size' | 'ref'> & Shared & { ref?: Ref<HTMLInputElement> },
+) {
+  return <Input inputSize="lg" {...props} />;
 }
 
-export function TextArea({ label, error, hint, id, className = '', ...props }: ComponentProps<'textarea'> & Shared & { id: string }) {
-  return (
-    <Field label={label} htmlFor={id} error={error} hint={hint}>
-      <textarea
-        id={id}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
-        className={`${inputClass(!!error)} ${className}`}
-        {...props}
-      />
-    </Field>
-  );
+export function TextArea(
+  props: Omit<ComponentProps<'textarea'>, 'ref'> & Shared & { ref?: Ref<HTMLTextAreaElement> },
+) {
+  return <Textarea {...props} />;
 }
 
-export function SelectField({
-  label,
-  error,
-  hint,
-  id,
-  className = '',
-  children,
-  ...props
-}: ComponentProps<'select'> & Shared & { id: string }) {
+export function SelectField({ children, ...props }: Omit<ComponentProps<'select'>, 'size'> & Shared) {
   return (
-    <Field label={label} htmlFor={id} error={error} hint={hint}>
-      <select
-        id={id}
-        aria-invalid={error ? true : undefined}
-        className={`${inputClass(!!error)} ${className}`}
-        {...props}
-      >
-        {children}
-      </select>
-    </Field>
+    <NativeSelect selectSize="lg" {...props}>
+      {children}
+    </NativeSelect>
   );
 }

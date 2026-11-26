@@ -1,26 +1,22 @@
+import { IconAlertCircle, IconCircleCheck, IconInfoCircle } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 
 type Tone = 'error' | 'success' | 'info';
 
-const TONES: Record<Tone, { chip: string; icon: string; role: 'alert' | 'status' }> = {
-  error: { chip: 'bg-pink', icon: '!', role: 'alert' },
-  success: { chip: 'bg-green', icon: '✓', role: 'status' },
-  info: { chip: 'bg-cyan', icon: 'i', role: 'status' },
-};
+const TONES = {
+  error: { Icon: IconAlertCircle, icon: 'text-urgent', box: 'border-urgent/30 bg-urgent/5', role: 'alert' },
+  success: { Icon: IconCircleCheck, icon: 'text-live', box: 'border-live/30 bg-live/5', role: 'status' },
+  info: { Icon: IconInfoCircle, icon: 'text-muted-foreground', box: 'border-border bg-surface-muted', role: 'status' },
+} as const;
 
-// Inline message block. The chip colour reinforces, but the icon glyph and
-// the text always say what it is, so it reads without colour.
+// Inline message block. The icon shape and the text carry the meaning, so it
+// reads without relying on colour.
 export function Notice({ tone = 'info', children }: { tone?: Tone; children: ReactNode }) {
-  const t = TONES[tone];
+  const { Icon, icon, box, role } = TONES[tone];
   return (
-    <div role={t.role} className="flex items-start gap-3 rounded-xl border-2 border-line bg-white p-3 text-sm shadow-hard-sm">
-      <span
-        aria-hidden
-        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-line text-[11px] font-extrabold leading-none ${t.chip}`}
-      >
-        {t.icon}
-      </span>
-      <div className="min-w-0 flex-1">{children}</div>
+    <div role={role} className={`flex items-start gap-2.5 rounded-xl border px-3.5 py-3 text-sm ${box}`}>
+      <Icon aria-hidden className={`mt-px size-4.5 shrink-0 ${icon}`} stroke={1.7} />
+      <div className="min-w-0 flex-1 leading-5">{children}</div>
     </div>
   );
 }

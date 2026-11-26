@@ -1,5 +1,6 @@
 'use client';
 
+import { IconSearchOff, IconShieldCheck } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
@@ -7,26 +8,21 @@ import { getAuctionRequest, listBidsRequest } from '@/lib/auctions';
 import { isOptimisticBid } from '@/lib/bids';
 import { CATEGORY_DISPLAY } from '@/lib/categoryDisplay';
 import { formatCents } from '@/lib/format';
+import { CONDITION_LABEL, lotRef } from '@/lib/lot';
 import { useAuctionSocket } from '@/lib/useAuctionSocket';
-import { useTimeRemaining } from '@/lib/useTimeRemaining';
 import { useAuthStore } from '@/store/authStore';
+import { SaleClock } from '../../components/Countdown';
+import { PriceTicker } from '../../components/PriceTicker';
 import { ButtonLink } from '../../components/ui/Button';
 import { Notice } from '../../components/ui/Notice';
 import { PageMessage, Skeleton } from '../../components/ui/Page';
 import { AuctionStatusPill } from '../../components/ui/StatusPill';
 import { BidForm } from './BidForm';
+import { BidLedger } from './BidLedger';
 import { Gallery } from './Gallery';
 import { PendingReviewPanel } from './PendingReviewPanel';
 import { SetPriceAndPublishPanel } from './SetPriceAndPublishPanel';
 import { ValuationPanel } from './ValuationPanel';
-
-const CONDITION_LABEL: Record<string, string> = {
-  NEW: 'New',
-  LIKE_NEW: 'Like new',
-  GOOD: 'Good',
-  FAIR: 'Fair',
-  POOR: 'Poor',
-};
 
 export default function AuctionDetailPage() {
   const params = useParams<{ id: string }>();
@@ -59,8 +55,6 @@ export default function AuctionDetailPage() {
   // nothing changes on any other status worth watching live.
   useAuctionSocket(auctionId, auctionQuery.data?.auction.status === 'ACTIVE', accessToken);
 
-  const timeRemaining = useTimeRemaining(auctionQuery.data?.auction.endTime ?? null);
-
   if (auctionQuery.isLoading) {
     return (
       <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-10" aria-busy="true">
@@ -80,9 +74,10 @@ export default function AuctionDetailPage() {
     return (
       <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-16">
         <PageMessage
-          title="We couldn't find that auction"
+          icon={IconSearchOff}
+          title="We couldn't find that lot"
           body="It may have been removed, or the link is wrong."
-          action={<ButtonLink href="/auctions">Browse auctions</ButtonLink>}
+          action={<ButtonLink href="/auctions">Open the catalogue</ButtonLink>}
         />
       </main>
     );
@@ -96,7 +91,6 @@ export default function AuctionDetailPage() {
   // show, so it is replaced by the seller's own panels (ADR-0041).
   const preLive = auction.status === 'DRAFT' || auction.status === 'PENDING_REVIEW';
   const isSeller = !!user && user.id === auction.sellerId;
-  const urgent = isActive && /^\d+s$/.test(timeRemaining);
 
   // Derived from server data, never client state: the leader is whoever
   // holds the highest accepted bid right now.
@@ -111,50 +105,28 @@ export default function AuctionDetailPage() {
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-8">
-      <nav aria-label="Breadcrumb" className="mb-6 text-sm text-ink/70">
-        <Link href="/auctions" className="font-semibold underline underline-offset-4">
-          Browse
-        </Link>{' '}
-        / {display.label}
+      <nav aria-label="Breadcrumb" className="eyebrow mb-6 flex items-center gap-2 border-b-2 border-foreground pb-3">
+        <Link href="/auctions" className="transition-colors hover:text-foreground">
+          Catalogue
+        </Link>
+        <span aria-hidden>/</span>
+        <Link href={`/auctions?category=${auction.category}`} className="transition-colors hover:text-foreground">
+          {display.label}
+        </Link>
+        <span className="ml-auto text-foreground">Lot {lotRef(auction.id)}</span>
       </nav>
 
-      <div className="grid items-start gap-10 lg:grid-cols-[1.1fr_1fr]">
-        <div className="flex flex-col gap-8">
+      <div className="grid items-start gap-10 lg:grid-cols-[1.1fr_1fr] lg:grid-rows-[auto_1fr] lg:gap-x-14">
+        <div className="min-w-0 lg:col-start-1 lg:row-start-1">
           <Gallery images={auction.images} title={auction.title} />
-
-          <section aria-labelledby="about-heading">
-            <h2 id="about-heading" className="font-display text-2xl font-extrabold">
-              About this item
-            </h2>
-            <p className="mt-3 whitespace-pre-wrap text-ink/80">{auction.description}</p>
-            <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
-              <div className="rounded-xl border-2 border-line bg-white p-3">
-                <dt className="text-ink/60">Condition</dt>
-                <dd className="font-semibold">{CONDITION_LABEL[auction.condition] ?? auction.condition}</dd>
-              </div>
-              <div className="rounded-xl border-2 border-line bg-white p-3">
-                <dt className="text-ink/60">Starting price</dt>
-                {/* DRAFT's startingPriceCents is a meaningless placeholder
-                    until SetPriceAndPublishPanel sets a real one. */}
-                <dd className="font-semibold">
-                  {auction.status === 'DRAFT' ? 'Not set yet' : formatCents(auction.startingPriceCents)}
-                </dd>
-              </div>
-            </dl>
-          </section>
         </div>
 
-        <div className="flex flex-col gap-6 lg:sticky lg:top-24">
+        <div className="flex min-w-0 flex-col gap-8 lg:col-start-2 lg:row-span-2 lg:row-start-1">
           <div>
-            <div className="mb-3 flex flex-wrap items-center gap-2">
-              <span className="rounded-full border-2 border-line bg-cream px-2.5 py-0.5 text-xs font-semibold">
-                {display.emoji} {display.label}
-              </span>
+            <div className="mb-4">
               <AuctionStatusPill status={auction.status} />
             </div>
-            <h1 className="font-display text-3xl font-extrabold leading-tight tracking-tight sm:text-4xl">
-              {auction.title}
-            </h1>
+            <h1 className="text-4xl font-medium leading-[1.06] tracking-tight sm:text-5xl">{auction.title}</h1>
           </div>
 
           {/* DRAFT has no real price/schedule yet (startingPriceCents is a
@@ -163,29 +135,18 @@ export default function AuctionDetailPage() {
               below for a DRAFT seller instead of showing meaningless
               numbers. */}
           {!preLive && (
-            <div className="rounded-2xl border-2 border-line bg-white p-5 shadow-hard">
-              <div className="flex items-end justify-between gap-4">
+            <div className="panel border-t-[3px] border-t-foreground p-5 sm:p-6">
+              <div className="flex flex-wrap items-start justify-between gap-6">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-ink/60">
-                    {isActive ? 'Current bid' : 'Final price'}
-                  </p>
-                  <p className="font-display text-4xl font-extrabold">{formatCents(auction.currentPriceCents)}</p>
+                  <p className="eyebrow mb-2">{isActive ? 'Current bid' : 'Closing price'}</p>
+                  <PriceTicker key={auction.id} cents={auction.currentPriceCents} className="text-5xl leading-none" />
                 </div>
-                <div className="text-right">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-ink/60">
-                    {isActive ? 'Time left' : 'Scheduled end'}
-                  </p>
+                <div>
+                  <p className="eyebrow mb-2">{isActive ? 'Closes in' : 'Scheduled end'}</p>
                   {isActive ? (
-                    <p
-                      className={`mt-1 inline-flex items-center gap-1.5 rounded-full border-2 border-line px-3 py-1 font-display text-lg font-extrabold tabular-nums ${
-                        urgent ? 'bg-pink' : 'bg-green'
-                      }`}
-                    >
-                      <span className="h-1.5 w-1.5 rounded-full bg-ink" />
-                      {timeRemaining}
-                    </p>
+                    <SaleClock endTime={auction.endTime} />
                   ) : (
-                    <p className="mt-1 font-semibold">
+                    <p className="figures text-lg">
                       {auction.endTime ? new Date(auction.endTime).toLocaleString() : '—'}
                     </p>
                   )}
@@ -193,7 +154,7 @@ export default function AuctionDetailPage() {
               </div>
 
               {isActive && (
-                <div className="mt-5 flex flex-col gap-4 border-t-2 border-line/10 pt-5">
+                <div className="mt-5 flex flex-col gap-4 border-t border-border pt-5">
                   {iAmLeading && <Notice tone="success">You&apos;re the highest bidder. Stay ready to defend it.</Notice>}
                   {iHaveBid && !iAmLeading && !(leadingBid && isOptimisticBid(leadingBid)) && (
                     <Notice tone="info">You&apos;ve been outbid. Place a higher bid to get back in front.</Notice>
@@ -209,11 +170,11 @@ export default function AuctionDetailPage() {
                   {isSeller && <Notice tone="info">This is your auction, so you can&apos;t bid on it.</Notice>}
                   {authStatus === 'anonymous' && (
                     <div className="flex flex-col gap-3">
-                      <p className="text-sm text-ink/70">Log in to place a bid on this item.</p>
+                      <p className="text-sm text-muted-foreground">Log in to place a bid on this item.</p>
                       <ButtonLink href="/login">Log in to bid</ButtonLink>
                     </div>
                   )}
-                  <p className="text-xs text-ink/60">
+                  <p className="text-xs text-muted-foreground">
                     A valid bid in the last 30 seconds extends the auction by 30 seconds.
                   </p>
                 </div>
@@ -223,9 +184,10 @@ export default function AuctionDetailPage() {
                   its documents were looked at; the item itself was not
                   inspected, so no authenticity promise is made. */}
               {auction.reviewedAt && (
-                <p className="mt-4 border-t-2 border-line/10 pt-4 text-xs text-ink/60">
-                  ✓ Reviewed by AuctionX before going live: listing details and any supporting documents were
-                  checked. This is not a guarantee of authenticity.
+                <p className="mt-5 flex gap-2.5 border-t border-border pt-4 text-xs leading-5 text-muted-foreground">
+                  <IconShieldCheck aria-hidden className="mt-0.5 size-4 shrink-0 text-live" stroke={1.7} />
+                  Reviewed by AuctionX before going live: listing details and any supporting documents were checked.
+                  This is not a guarantee of authenticity.
                 </p>
               )}
 
@@ -234,10 +196,10 @@ export default function AuctionDetailPage() {
                   is looked up the other way, by auctionId, only when needed).
                   "Orders" (NavBar) lists every order a participant has. */}
               {auction.status === 'ENDED' && user && (isSeller || iHaveBid) && (
-                <div className="mt-5 border-t-2 border-line/10 pt-5">
+                <div className="mt-5 border-t border-border pt-5">
                   <Notice tone="info">
                     This auction has ended. Check{' '}
-                    <Link href="/orders" className="font-semibold underline underline-offset-4">
+                    <Link href="/orders" className="font-medium underline underline-offset-4">
                       your orders
                     </Link>{' '}
                     for the outcome.
@@ -269,64 +231,52 @@ export default function AuctionDetailPage() {
           {!isSeller && user?.role === 'ADMIN' && auction.status === 'PENDING_REVIEW' && (
             <Notice tone="info">
               This listing is waiting for review.{' '}
-              <Link href="/admin/auctions?status=PENDING_REVIEW" className="font-semibold underline underline-offset-4">
+              <Link href="/admin/auctions?status=PENDING_REVIEW" className="font-medium underline underline-offset-4">
                 Open the review queue
               </Link>
             </Notice>
           )}
 
-          <section aria-labelledby="bids-heading">
-            <div className="mb-3 flex items-baseline justify-between">
-              <h2 id="bids-heading" className="font-display text-xl font-extrabold">
-                Bid history
-              </h2>
-              <span className="text-sm text-ink/60">
-                {bids.length} {bids.length === 1 ? 'bid' : 'bids'}
-              </span>
-            </div>
-            {bids.length === 0 ? (
-              <p className="rounded-xl border-2 border-dashed border-line/30 p-4 text-sm text-ink/70">
-                No bids yet. Be the first.
-              </p>
-            ) : (
-              <ul className="overflow-hidden rounded-2xl border-2 border-line bg-white">
-                {bids.map((bid) => {
-                  const pending = isOptimisticBid(bid);
-                  const isLeader = bid.id === leadingBid?.id && !pending;
-                  const mine = !!user && bid.bidderId === user.id;
-                  return (
-                    <li
-                      key={bid.id}
-                      className={`flex items-center justify-between gap-3 border-b border-line/10 px-4 py-2.5 text-sm last:border-b-0 ${
-                        isLeader ? 'bg-yellow/30' : ''
-                      }`}
-                    >
-                      <span className="flex flex-wrap items-center gap-2">
-                        <span className="text-ink/70">{new Date(bid.createdAt).toLocaleString()}</span>
-                        {isLeader && (
-                          <span className="rounded-full border-2 border-line bg-yellow px-2 py-0 text-[11px] font-bold">
-                            Leading
-                          </span>
-                        )}
-                        {mine && (
-                          <span className="rounded-full border-2 border-line bg-cyan px-2 py-0 text-[11px] font-bold">
-                            You
-                          </span>
-                        )}
-                        {pending && (
-                          <span className="animate-pulse rounded-full border-2 border-line bg-white px-2 py-0 text-[11px] font-bold">
-                            Placing…
-                          </span>
-                        )}
-                      </span>
-                      <span className="font-display font-extrabold">{formatCents(bid.amountCents)}</span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
+          <BidLedger
+            bids={bids}
+            startingPriceCents={auction.startingPriceCents}
+            userId={user?.id}
+            leadingBidId={leadingBid?.id}
+          />
         </div>
+
+        <section aria-labelledby="about-heading" className="min-w-0 lg:col-start-1 lg:row-start-2">
+          <h2 id="about-heading" className="border-b border-border-strong pb-2 text-2xl font-medium">
+            Catalogue note
+          </h2>
+          {/* The opening capital only works with enough text to wrap around it. */}
+          <p
+            className={`mt-4 flow-root whitespace-pre-wrap break-words font-serif text-lg leading-8 ${
+              auction.description.length > 140 ? 'drop-cap' : ''
+            }`}
+          >
+            {auction.description}
+          </p>
+          {/* Term, dot leader, value: the way a lot's particulars are set. */}
+          <dl className="mt-6 text-sm">
+            {[
+              { term: 'Department', value: display.label },
+              { term: 'Condition', value: CONDITION_LABEL[auction.condition] ?? auction.condition },
+              {
+                // DRAFT's startingPriceCents is a meaningless placeholder
+                // until SetPriceAndPublishPanel sets a real one.
+                term: 'Starting price',
+                value: auction.status === 'DRAFT' ? 'Not set yet' : formatCents(auction.startingPriceCents),
+              },
+            ].map(({ term, value }) => (
+              <div key={term} className="flex items-baseline gap-3 py-2">
+                <dt className="eyebrow">{term}</dt>
+                <span aria-hidden className="leader" />
+                <dd className="figures text-lg">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
       </div>
     </main>
   );

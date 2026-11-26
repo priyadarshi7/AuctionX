@@ -2,10 +2,11 @@
 
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { Tabs, TabsList, TabsTrigger } from '@/components/wensity/tabs';
 import { listAuctionsRequest } from '@/lib/auctions';
 import type { AuctionStatus } from '@/lib/types/auction';
 import { useRequireAuth } from '@/lib/useRequireAuth';
-import { ButtonLink } from '../components/ui/Button';
+import { Button, ButtonLink } from '../components/ui/Button';
 import { PageHeader, PageLoading, PageMessage, Skeleton } from '../components/ui/Page';
 import { AuctionRow } from './AuctionRow';
 
@@ -61,27 +62,20 @@ export default function MyAuctionsPage() {
         action={<ButtonLink href="/auctions/new">Sell an item</ButtonLink>}
       />
 
-      <div role="tablist" aria-label="Filter my auctions" className="mb-6 flex flex-wrap gap-2">
-        {FILTERS.map((f) => {
-          const count = all.filter((a) => f.match(a.status)).length;
-          const selected = filter === f.id;
-          return (
-            <button
-              key={f.id}
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              onClick={() => setFilter(f.id)}
-              className={`rounded-full border-2 border-line px-4 py-1.5 text-sm font-semibold transition-colors ${
-                selected ? 'bg-ink text-cream' : 'bg-white hover:bg-cream-2'
-              }`}
-            >
+      <Tabs variant="segmented" value={filter} onValueChange={(next) => setFilter(next as Filter)} className="mb-6 items-start">
+        <TabsList aria-label="Filter my auctions">
+          {FILTERS.map((f) => (
+            <TabsTrigger key={f.id} value={f.id}>
               {f.label}
-              {!isLoading && <span className={`ml-1.5 ${selected ? 'text-cream/70' : 'text-ink/60'}`}>{count}</span>}
-            </button>
-          );
-        })}
-      </div>
+              {!isLoading && (
+                <span className="text-xs tabular-nums text-muted-foreground">
+                  {all.filter((a) => f.match(a.status)).length}
+                </span>
+              )}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
       {isLoading && (
         <ul className="flex flex-col gap-3" aria-busy="true">
@@ -98,20 +92,15 @@ export default function MyAuctionsPage() {
           title="Couldn't load your auctions"
           body="Check your connection and try again."
           action={
-            <button
-              type="button"
-              onClick={() => void refetch()}
-              className="rounded-full border-2 border-line bg-white px-5 py-2 text-sm font-semibold shadow-hard-sm"
-            >
+            <Button variant="secondary" size="sm" onClick={() => void refetch()}>
               Try again
-            </button>
+            </Button>
           }
         />
       )}
 
       {!isLoading && !isError && visible.length === 0 && (
         <PageMessage
-          mascotColor="#f5c94b"
           title={all.length === 0 ? 'You haven’t listed anything yet' : `No ${active.label.toLowerCase()} auctions`}
           body={
             all.length === 0

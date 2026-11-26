@@ -30,13 +30,13 @@ export function ReasonForm({
 
   return (
     <form
-      className="mt-3 flex flex-col gap-2 rounded-xl border-2 border-line bg-cream-2 p-3"
+      className="mt-3 flex flex-col gap-2 rounded-xl border border-border bg-surface-muted p-3"
       onSubmit={(e) => {
         e.preventDefault();
         if (valid && !pending) onConfirm(trimmed);
       }}
     >
-      <label className="text-sm font-semibold">
+      <label className="text-sm font-medium">
         {prompt}
         <textarea
           value={reason}
@@ -45,7 +45,7 @@ export function ReasonForm({
           maxLength={500}
           required={reasonRequired}
           autoFocus
-          className="mt-1.5 w-full rounded-xl border-2 border-line bg-white px-3 py-2 text-base font-normal"
+          className="mt-1.5 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-primitive-ring"
           placeholder={reasonRequired ? 'At least 3 characters. Saved to the audit log.' : 'Optional'}
         />
       </label>

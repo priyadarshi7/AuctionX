@@ -66,9 +66,9 @@ export function SetPriceAndPublishPanel({
   const submitError = submit.error instanceof ApiError ? submit.error.message : submit.error ? 'Something went wrong.' : null;
 
   return (
-    <div className="rounded-2xl border-2 border-line bg-white p-5 shadow-hard">
-      <h2 className="font-display text-lg font-extrabold">Price, documents &amp; submit</h2>
-      <p className="mt-1 text-sm text-ink/70">
+    <div className="panel p-5">
+      <h2 className="text-lg font-semibold">Price, documents &amp; submit</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
         This draft is only visible to you. Use the AI valuation above as a rough guide and set your own price. When you
         submit, AuctionX may review the listing before it goes live. Your auction’s timer only starts once it is live.
       </p>
@@ -78,7 +78,7 @@ export function SetPriceAndPublishPanel({
           <Notice tone="error">
             <p className="font-semibold">Changes requested by the reviewer</p>
             <p className="mt-0.5">{reviewNote}</p>
-            <p className="mt-1 text-ink/70">Fix what they mention, then submit again.</p>
+            <p className="mt-1 text-muted-foreground">Fix what they mention, then submit again.</p>
           </Notice>
         </div>
       )}
@@ -131,10 +131,10 @@ export function SetPriceAndPublishPanel({
         </SelectField>
 
         <div>
-          <p className="mb-1.5 text-sm font-semibold">
+          <p className="mb-1.5 text-sm font-medium">
             Supporting documents{needsDocuments ? ' (required for this category)' : ' (optional)'}
           </p>
-          <p className="mb-2 text-sm text-ink/70">
+          <p className="mb-2 text-sm text-muted-foreground">
             A certificate, receipt or provenance helps the reviewer approve your listing. Only you and AuctionX
             reviewers can see them. They are never shown publicly.
           </p>

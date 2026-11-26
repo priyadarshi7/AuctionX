@@ -24,8 +24,8 @@ export function PendingReviewPanel({ auction, accessToken }: { auction: Auction;
     : null;
 
   return (
-    <div className="rounded-2xl border-2 border-line bg-white p-5 shadow-hard">
-      <h2 className="font-display text-lg font-extrabold">Waiting for review</h2>
+    <div className="panel p-5">
+      <h2 className="text-lg font-semibold">Waiting for review</h2>
       <div className="mt-3">
         <Notice tone="info">
           <p>
@@ -33,7 +33,7 @@ export function PendingReviewPanel({ auction, accessToken }: { auction: Auction;
             will check the listing details and documents, and you’ll be notified either way.
           </p>
           {duration && (
-            <p className="mt-1 text-ink/70">
+            <p className="mt-1 text-muted-foreground">
               Once approved it goes live right away and runs for {duration.toLowerCase()}. The timer starts at
               approval, not now.
             </p>
@@ -41,7 +41,7 @@ export function PendingReviewPanel({ auction, accessToken }: { auction: Auction;
         </Notice>
       </div>
 
-      <h3 className="mb-2 mt-5 text-sm font-semibold">Documents you submitted</h3>
+      <h3 className="mb-2 mt-5 text-sm font-medium">Documents you submitted</h3>
       <DocumentsPanel auctionId={auction.id} accessToken={accessToken} editable={false} />
 
       {error && (
@@ -49,11 +49,11 @@ export function PendingReviewPanel({ auction, accessToken }: { auction: Auction;
           <Notice tone="error">{error}</Notice>
         </div>
       )}
-      <div className="mt-5 border-t-2 border-line/10 pt-4">
+      <div className="mt-5 border-t border-border pt-4">
         <Button variant="secondary" size="sm" onClick={() => withdraw.mutate()} disabled={withdraw.isPending}>
           {withdraw.isPending ? 'Withdrawing…' : 'Withdraw to make changes'}
         </Button>
-        <p className="mt-1.5 text-xs text-ink/60">This returns it to a draft. You’ll need to submit it again.</p>
+        <p className="mt-1.5 text-xs text-muted-foreground">This returns it to a draft. You’ll need to submit it again.</p>
       </div>
     </div>
   );

@@ -8,9 +8,9 @@ import { listOrdersAdminRequest, refundOrderRequest } from '@/lib/admin';
 import { ApiError } from '@/lib/apiClient';
 import { formatCents } from '@/lib/format';
 import type { OrderStatus } from '@/lib/types/order';
+import { NativeSelect } from '@/components/wensity/native-select';
 import { useAuthStore } from '@/store/authStore';
 import { Button } from '../../components/ui/Button';
-import { inputClass } from '../../components/ui/Field';
 import { Notice } from '../../components/ui/Notice';
 import { PageHeader, PageMessage, Skeleton } from '../../components/ui/Page';
 import { OrderStatusPill } from '../../components/ui/StatusPill';
@@ -53,12 +53,12 @@ function OrdersList() {
       <PageHeader title="Orders" subtitle="Every order across the marketplace." />
 
       <div className="mb-5 flex flex-wrap items-center gap-3">
-        <select
+        <NativeSelect
           aria-label="Filter by status"
           value={status}
           disabled={needsRefund}
           onChange={(e) => setStatus(e.target.value as OrderStatus | '')}
-          className={`${inputClass(false)} sm:w-auto`}
+          selectSize="lg" fullWidth={false}
         >
           <option value="">All statuses</option>
           {STATUSES.map((s) => (
@@ -66,8 +66,8 @@ function OrdersList() {
               {s}
             </option>
           ))}
-        </select>
-        <label className="flex items-center gap-2 text-sm font-semibold">
+        </NativeSelect>
+        <label className="flex items-center gap-2 text-sm font-medium">
           <input type="checkbox" checked={needsRefund} onChange={(e) => setNeedsRefund(e.target.checked)} />
           Only orders that need a refund
         </label>
@@ -94,32 +94,32 @@ function OrdersList() {
         <PageMessage title="No orders match" body="Try a different filter." />
       )}
       {orders.length > 0 && (
-        <ul className="overflow-hidden rounded-2xl border-2 border-line bg-white">
+        <ul className="overflow-hidden panel">
           {orders.map((order) => (
-            <li key={order.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-line/10 px-4 py-3 last:border-b-0">
+            <li key={order.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 last:border-b-0">
               <div className="min-w-0 text-sm">
-                <p className="font-display font-bold">
+                <p className="font-medium">
                   Order {order.id.slice(0, 8)} ·{' '}
                   <Link href={`/auctions/${order.auctionId}`} className="underline underline-offset-4">
                     view auction
                   </Link>
                 </p>
-                <p className="truncate text-ink/70">
+                <p className="truncate text-muted-foreground">
                   {order.buyerEmail} bought from {order.sellerEmail} · {new Date(order.createdAt).toLocaleDateString()}
                 </p>
                 {order.status === 'CANCELLED' && order.cancelReason && (
-                  <p className="text-ink/60">Cancelled: {order.cancelReason === 'PAYMENT_TIMEOUT' ? 'payment timed out' : 'by an admin'}</p>
+                  <p className="text-muted-foreground">Cancelled: {order.cancelReason === 'PAYMENT_TIMEOUT' ? 'payment timed out' : 'by an admin'}</p>
                 )}
               </div>
               <div className="flex items-center gap-3">
                 {order.needsRefund && (
                   <>
-                    <span className="rounded-full border-2 border-line bg-pink px-2.5 py-0.5 text-xs font-bold">Needs refund</span>
+                    <span className="rounded-md border border-urgent/30 bg-urgent/10 px-2 py-0.5 text-xs font-medium text-urgent">Needs refund</span>
                     <RefundButton orderId={order.id} accessToken={accessToken} />
                   </>
                 )}
                 <OrderStatusPill status={order.status} />
-                <p className="font-display text-lg font-extrabold">{formatCents(order.amountCents)}</p>
+                <p className="figures text-xl">{formatCents(order.amountCents)}</p>
               </div>
             </li>
           ))}

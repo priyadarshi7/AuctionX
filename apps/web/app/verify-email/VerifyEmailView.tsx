@@ -80,7 +80,7 @@ export function VerifyEmailView() {
     return (
       <main className="mx-auto w-full max-w-2xl flex-1 px-6 py-16">
         <Notice tone="error">{errorMessage}</Notice>
-        <p className="mt-4 text-sm text-ink/70">
+        <p className="mt-4 text-sm text-muted-foreground">
           Links expire after 24 hours. If you&apos;re logged in, you can request a new one from the
           verification banner on any page.
         </p>
