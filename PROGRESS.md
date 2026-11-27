@@ -110,6 +110,10 @@ mid-session; still open whenever convenient.
   "AI appraisal" with a price guide on draft lots. Groq when `GROQ_API_KEY` is
   set (API host only, never the web app); otherwise the assistant is hidden and
   valuation falls back to Ollama. No migration.
+- **RATELIMIT-003 (ADR-0047):** fixed visitors sharing rate-limit counters in
+  production (no `trust proxy`, so `req.ip` was the proxy). Trusted proxy
+  ranges added; token refresh and the AI review got their own IP limits. After
+  deploying, check `clientIp` in Render logs shows a real public address.
 - **Local ports moved** to avoid other projects: s3mock `9190`, Redpanda `9192`.
 - **Tests:** 320 of 321 backend tests pass; web `next build` passes. The failure
   is `notifications.test.ts` PAYMENT_RECEIVED: it pays without saving a delivery

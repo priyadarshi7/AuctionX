@@ -1,7 +1,11 @@
 import { Router } from 'express';
 import { isGroqConfigured } from '../../infrastructure/ai/groqClient';
 import { authenticate } from '../../middleware/authenticate';
-import { aiListingGlobalRateLimit, aiListingRateLimit } from '../../middleware/rateLimit';
+import {
+  aiListingGlobalRateLimit,
+  aiListingIpRateLimit,
+  aiListingRateLimit,
+} from '../../middleware/rateLimit';
 import { validateBody } from '../../middleware/validate';
 import { suggestListing } from './listingAssistant';
 import { listingSuggestionRequestSchema, type ListingSuggestionRequest } from './listingSchema';
@@ -21,6 +25,7 @@ aiListingRoutes.post(
   '/listing-suggestions',
   authenticate,
   aiListingRateLimit,
+  aiListingIpRateLimit,
   aiListingGlobalRateLimit,
   validateBody(listingSuggestionRequestSchema),
   async (req, res, next) => {

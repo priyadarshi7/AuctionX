@@ -128,6 +128,19 @@ export const authRateLimit = rateLimit({
   keyBy: (req) => `ip:${req.ip ?? 'unknown'}`,
 });
 
+// Token refresh has its own, looser ceiling (ADR-0047). The web app calls it
+// on every full page load, so sharing authRateLimit's budget meant ordinary
+// reloading could block signing in. It guesses nothing: the credential is a
+// long random cookie, not something worth brute-forcing.
+export const REFRESH_RATE_LIMIT_MAX = 120;
+
+export const refreshRateLimit = rateLimit({
+  windowSeconds: 15 * 60,
+  max: isTestEnv ? TEST_ENV_MAX : REFRESH_RATE_LIMIT_MAX,
+  keyPrefix: 'auth-refresh',
+  keyBy: (req) => `ip:${req.ip ?? 'unknown'}`,
+});
+
 // forgot-password gets its OWN pair, not authRateLimit reused, because it
 // has a distinct abuse shape: someone spamming reset requests at one victim
 // email from many different IPs would sail straight through an IP-only
@@ -215,8 +228,16 @@ export const aiRegenerateRateLimit = rateLimit({
 });
 
 // The listing assistant spends a quota shared by every user (Groq's per-key
-// limits), so it gets two ceilings: one so a single seller cannot use it all,
-// and one for the whole deployment.
+// limits), so it gets three ceilings: per seller, per IP (so one person with
+// several accounts cannot use it all) and for the whole deployment. They run
+// in that order, so a blocked caller never spends the shared budget.
+export const aiListingIpRateLimit = rateLimit({
+  windowSeconds: 60 * 60,
+  max: isTestEnv ? TEST_ENV_MAX : 20,
+  keyPrefix: 'ai-listing-ip',
+  keyBy: (req) => `ip:${req.ip ?? 'unknown'}`,
+});
+
 export const aiListingRateLimit = rateLimit({
   windowSeconds: 10 * 60,
   max: isTestEnv ? TEST_ENV_MAX : 8,

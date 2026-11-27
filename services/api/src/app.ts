@@ -1,6 +1,6 @@
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
-import express, { type Express } from 'express';
+import express, { type Express, type Request } from 'express';
 import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
 import { randomUUID } from 'node:crypto';
@@ -22,9 +22,13 @@ import { notificationRoutes } from './modules/notifications/routes';
 import { searchRoutes } from './modules/search/routes';
 import { aiValuationRoutes } from './modules/ai/routes';
 import { aiListingRoutes } from './modules/ai/listingRoutes';
+import { TRUSTED_PROXIES } from './config/trustedProxies';
 
 export function createApp(): Express {
   const app = express();
+
+  // First, so req.ip is the real client everywhere below (ADR-0047).
+  app.set('trust proxy', TRUSTED_PROXIES);
 
   app.use(helmet());
   // A real frontend origin exists now (apps/web) — this closes the gap
@@ -46,6 +50,9 @@ export function createApp(): Express {
   app.use(
     pinoHttp({
       logger,
+      // The address rate limits are counted against, so it can be checked in
+      // production logs (ADR-0047).
+      customProps: (req) => ({ clientIp: (req as Request).ip }),
       genReqId: (req, res) => {
         const existing = req.headers['x-request-id'];
         const id = typeof existing === 'string' ? existing : randomUUID();

@@ -23,6 +23,7 @@ import { reindexAllAuctions } from './modules/search/service';
 import { startAiValuationConsumer, stopAiValuationConsumer } from './modules/ai/consumer';
 
 import { paymentProvider } from './infrastructure/payments';
+import { isGroqConfigured } from './infrastructure/ai/groqClient';
 import { startShipmentSimulatorWorker, stopShipmentSimulatorWorker } from './infrastructure/jobs/shipmentSimulatorWorker';
 import { startOrderAutoConfirmWorker, stopOrderAutoConfirmWorker } from './infrastructure/jobs/orderAutoConfirmWorker';
 import { startDocumentOrphanSweeper, stopDocumentOrphanSweeper } from './infrastructure/jobs/documentOrphanSweeper';
@@ -42,6 +43,14 @@ logger.info(
 if (env.STRIPE_SECRET_KEY && !env.STRIPE_WEBHOOK_SECRET) {
   logger.warn('STRIPE_WEBHOOK_SECRET is not set: Stripe webhooks will be rejected; payments settle via the buyer-triggered sync only');
 }
+// Likewise for AI: the web app hides the listing assistant when there is no
+// key, so the log is where that shows. Never log the key itself.
+logger.info(
+  { groqConfigured: isGroqConfigured(), groqModel: env.GROQ_MODEL },
+  isGroqConfigured()
+    ? 'AI: Groq (listing assistant and valuation)'
+    : 'AI: GROQ_API_KEY is not set; listing assistant hidden, valuation uses Ollama',
+);
 startAuctionClosingWorker();
 startOrderPaymentDeadlineWorker();
 startDocumentOrphanSweeper();

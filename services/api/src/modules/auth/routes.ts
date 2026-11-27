@@ -6,6 +6,7 @@ import {
   authRateLimit,
   forgotPasswordEmailRateLimit,
   forgotPasswordIpRateLimit,
+  refreshRateLimit,
   resendVerificationRateLimit,
 } from '../../middleware/rateLimit';
 import { validateBody } from '../../middleware/validate';
@@ -39,13 +40,13 @@ export const authRoutes = Router();
 const requireTrustedOrigin = createRequireTrustedOrigin(env.FRONTEND_URL, env.NODE_ENV === 'production');
 
 // authRateLimit stacks on top of the global apiRateLimit already applied in
-// app.ts — these three are pre-authentication by nature (no identity to key
+// app.ts — these routes are pre-authentication by nature (no identity to key
 // by), so they need their own strict, IP-keyed ceiling regardless of the
 // generous authenticated-user quota the global limiter would otherwise give
-// out (Section 30: "Login: strict").
+// out (Section 30: "Login: strict"). /refresh has a looser one (ADR-0047).
 authRoutes.post('/register', authRateLimit, validateBody(registerSchema), register);
 authRoutes.post('/login', authRateLimit, validateBody(loginSchema), login);
-authRoutes.post('/refresh', authRateLimit, requireTrustedOrigin, refresh);
+authRoutes.post('/refresh', refreshRateLimit, requireTrustedOrigin, refresh);
 authRoutes.post('/logout', requireTrustedOrigin, logout);
 authRoutes.get('/me', authenticate, me);
 // No dedicated rate limiter — self-only, destructive-but-rare (the global
