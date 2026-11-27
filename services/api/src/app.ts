@@ -21,6 +21,7 @@ import { paymentWebhookRoutes } from './modules/payments/routes';
 import { notificationRoutes } from './modules/notifications/routes';
 import { searchRoutes } from './modules/search/routes';
 import { aiValuationRoutes } from './modules/ai/routes';
+import { aiListingRoutes } from './modules/ai/listingRoutes';
 
 export function createApp(): Express {
   const app = express();
@@ -90,6 +91,7 @@ export function createApp(): Express {
   app.use('/api/v1/notifications', notificationRoutes);
   app.use('/api/v1/search', searchRoutes);
   app.use('/api/v1/auctions/:auctionId/valuation', aiValuationRoutes);
+  app.use('/api/v1/ai', aiListingRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -237,12 +237,15 @@ export default function AuctionDetailPage() {
             </Notice>
           )}
 
-          <BidLedger
-            bids={bids}
-            startingPriceCents={auction.startingPriceCents}
-            userId={user?.id}
-            leadingBidId={leadingBid?.id}
-          />
+          {/* A lot that has not gone live can have no bids to list. */}
+          {!preLive && (
+            <BidLedger
+              bids={bids}
+              startingPriceCents={auction.startingPriceCents}
+              userId={user?.id}
+              leadingBidId={leadingBid?.id}
+            />
+          )}
         </div>
 
         <section aria-labelledby="about-heading" className="min-w-0 lg:col-start-1 lg:row-start-2">

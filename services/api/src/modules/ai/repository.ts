@@ -1,8 +1,31 @@
-import type { AuctionValuation, Prisma } from '@prisma/client';
+import type { Auction, AuctionValuation, Prisma } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma';
 import { createOutboxEventInTx } from '../../infrastructure/outbox/repository';
 import { AI_VALUATION_EVENTS_TOPIC } from '../../infrastructure/kafka/topics';
-import type { ValuationResult } from '../../infrastructure/ai/valuationProvider';
+import type { Comparable, ValuationResult } from '../../infrastructure/ai/valuationProvider';
+
+const MAX_COMPARABLES = 5;
+
+// Recently SOLD lots in one category: ended with at least one bid (an unsold
+// lot's price is just its asking price) and, if there was a reserve, met it.
+export async function findComparableSales(category: Auction['category'], excludeAuctionId: string): Promise<Comparable[]> {
+  const rows = await prisma.auction.findMany({
+    where: { category, status: 'ENDED', id: { not: excludeAuctionId }, bids: { some: {} } },
+    orderBy: { endedAt: 'desc' },
+    take: MAX_COMPARABLES * 2,
+    select: { id: true, title: true, condition: true, currentPriceCents: true, reservePriceCents: true, endedAt: true },
+  });
+  return rows
+    .filter((row) => row.reservePriceCents === null || row.currentPriceCents >= row.reservePriceCents)
+    .slice(0, MAX_COMPARABLES)
+    .map((row) => ({
+      auctionId: row.id,
+      title: row.title,
+      condition: row.condition,
+      priceCents: row.currentPriceCents,
+      endedAt: row.endedAt,
+    }));
+}
 
 export function findValuationByAuctionId(auctionId: string): Promise<AuctionValuation | null> {
   return prisma.auctionValuation.findUnique({ where: { auctionId } });

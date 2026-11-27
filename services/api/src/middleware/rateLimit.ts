@@ -214,6 +214,23 @@ export const aiRegenerateRateLimit = rateLimit({
   keyBy: (req) => `user:${req.user?.id ?? 'unknown'}`,
 });
 
+// The listing assistant spends a quota shared by every user (Groq's per-key
+// limits), so it gets two ceilings: one so a single seller cannot use it all,
+// and one for the whole deployment.
+export const aiListingRateLimit = rateLimit({
+  windowSeconds: 10 * 60,
+  max: isTestEnv ? TEST_ENV_MAX : 8,
+  keyPrefix: 'ai-listing',
+  keyBy: (req) => `user:${req.user?.id ?? 'unknown'}`,
+});
+
+export const aiListingGlobalRateLimit = rateLimit({
+  windowSeconds: 60 * 60,
+  max: isTestEnv ? TEST_ENV_MAX : 60,
+  keyPrefix: 'ai-listing-global',
+  keyBy: () => 'all',
+});
+
 // Authenticated, so user-keyed rather than IP-keyed like forgot-password —
 // the caller already proved their identity, the only thing worth bounding
 // is spamming their own inbox (or, at real request volume, the shared

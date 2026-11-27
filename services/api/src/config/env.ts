@@ -192,6 +192,19 @@ const envSchema = z.object({
   // seconds per call, not milliseconds — generous on purpose, this is a
   // background worker's timeout, never on any user-facing request path.
   OLLAMA_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+  // Groq (hosted, ADR-0046): powers the listing assistant, and valuation when
+  // set. Optional — without a key the app boots normally, valuation falls back
+  // to Ollama and the assistant is hidden. An empty value counts as unset, so
+  // a blank `GROQ_API_KEY=` line is harmless. A secret: server only.
+  GROQ_API_KEY: z.preprocess((value) => (value === '' ? undefined : value), z.string().min(1).optional()),
+  // Must accept images. Preview models can be withdrawn at short notice, so
+  // this is configuration rather than code.
+  GROQ_MODEL: z.string().min(1).default('qwen/qwen3.8-27b'),
+  GROQ_BASE_URL: z.string().url().default('https://api.groq.com/openai/v1'),
+  GROQ_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  // Each image costs about 2,000 tokens, and the per-minute token limit is
+  // small on lower tiers; two keeps one request well inside it.
+  GROQ_MAX_IMAGES: z.coerce.number().int().min(0).max(3).default(2),
 }).superRefine((value, ctx) => {
   // Fail fast (Section 51) on a half-configured SASL setup rather than
   // booting and only discovering the gap when Kafka first tries to connect.

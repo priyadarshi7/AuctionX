@@ -2,7 +2,8 @@ import type { AuctionValuation } from '@prisma/client';
 import { prisma } from '../../infrastructure/database/prisma';
 import { ForbiddenError, NotFoundError } from '../../middleware/errors';
 import { findAuctionById } from '../auctions/repository';
-import { findValuationByAuctionId, requestValuationInTx } from './repository';
+import type { Comparable } from '../../infrastructure/ai/valuationProvider';
+import { findComparableSales, findValuationByAuctionId, requestValuationInTx } from './repository';
 
 // Mirrors modules/auctions/service.ts's own requireOwnedAuction exactly
 // (404 for a DRAFT auction owned by someone else — an invisible listing's
@@ -26,12 +27,18 @@ async function requireOwnedAuction(userId: string, auctionId: string) {
 // bidder should see (Section 20's stated use case is the seller, and
 // showing a bidder "the AI thinks this is worth less than the asking
 // price" would actively work against the seller for no product reason).
-export async function getValuation(userId: string, auctionId: string): Promise<AuctionValuation> {
-  await requireOwnedAuction(userId, auctionId);
+export async function getValuation(
+  userId: string,
+  auctionId: string,
+): Promise<{ valuation: AuctionValuation; comparables: Comparable[] }> {
+  const auction = await requireOwnedAuction(userId, auctionId);
+  // Read at request time, so the list is current rather than a copy of what
+  // the model saw.
+  const comparables = await findComparableSales(auction.category, auctionId);
 
   const existing = await findValuationByAuctionId(auctionId);
   if (existing) {
-    return existing;
+    return { valuation: existing, comparables };
   }
 
   // Lazy backfill: an auction created before this feature existed (or
@@ -41,7 +48,8 @@ export async function getValuation(userId: string, auctionId: string): Promise<A
   // forever unless something explicitly backfills it. Rather than repeating
   // that mistake and needing a second reindex-style script, the first GET
   // for a row-less auction creates one PENDING and triggers it right here.
-  return prisma.$transaction((tx) => requestValuationInTx(tx, auctionId));
+  const valuation = await prisma.$transaction((tx) => requestValuationInTx(tx, auctionId));
+  return { valuation, comparables };
 }
 
 // Re-triggers valuation from scratch — for a FAILED row (Ollama was down,

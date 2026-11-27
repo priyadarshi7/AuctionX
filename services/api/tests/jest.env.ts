@@ -9,3 +9,7 @@ process.env.AUCTION_REVIEW_MODE = 'off';
 // Stripe tests build their own provider and fake the module boundary.
 delete process.env.STRIPE_SECRET_KEY;
 delete process.env.STRIPE_WEBHOOK_SECRET;
+
+// Likewise no test ever spends real Groq quota. dotenv has already run, so
+// blank the key (an empty value counts as unset in config/env.ts).
+process.env.GROQ_API_KEY = '';

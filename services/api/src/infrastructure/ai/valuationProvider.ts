@@ -15,6 +15,17 @@ export type ValuationInput = {
   // fetching bytes itself, so this interface stays transport-agnostic (a
   // future cloud provider might accept URLs directly instead of bytes).
   imageUrls: string[];
+  // What similar lots actually sold for on this platform. Optional: a
+  // provider may ignore it.
+  comparables?: Comparable[];
+};
+
+export type Comparable = {
+  auctionId: string;
+  title: string;
+  condition: string;
+  priceCents: number;
+  endedAt: Date | null;
 };
 
 export type ValuationResult = {

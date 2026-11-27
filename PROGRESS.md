@@ -102,7 +102,26 @@ developer chose to defer the actual shrink (`wsl --shutdown` + admin
 `diskpart compact vdisk`, briefly stops all containers) rather than do it
 mid-session; still open whenever convenient.
 
-## Latest status (2026-10-04) — read this first
+## Update 2026-11-27 — redesign and Groq AI features
+
+- **Web redesign** ("auction catalogue" identity, light and dark) is pushed
+  (`ca7fc76`).
+- **AI-002 (ADR-0046):** listing assistant on the Sell page and a redesigned
+  "AI appraisal" with a price guide on draft lots. Groq when `GROQ_API_KEY` is
+  set (API host only, never the web app); otherwise the assistant is hidden and
+  valuation falls back to Ollama. No migration.
+- **Local ports moved** to avoid other projects: s3mock `9190`, Redpanda `9192`.
+- **Tests:** 320 of 321 backend tests pass; web `next build` passes. The failure
+  is `notifications.test.ts` PAYMENT_RECEIVED: it pays without saving a delivery
+  address (required since ADR-0045), so the order never reaches PAID. Test
+  needs updating.
+- **Deploy:** add `GROQ_API_KEY` on Render. Not yet verified with a full
+  signed-in browser run.
+- **Open:** Home headline reads "The sale is between sales" when empty; square
+  photo frames crop tall images; AI bidding agents were researched only (next
+  step would be a design record for proxy bidding).
+
+## Latest status (2026-10-04)
 
 The app IS deployed (Vercel frontend, Render Singapore backend, Supabase
 Postgres, Upstash Redis, Aiven Kafka, Supabase Storage, Brevo email); the

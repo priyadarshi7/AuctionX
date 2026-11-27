@@ -16,6 +16,7 @@ import { useRequireAuth } from '@/lib/useRequireAuth';
 import { createAuctionFormSchema, type CreateAuctionFormValues } from '@/lib/validation/auction';
 import { Button } from '../../components/ui/Button';
 import { SelectField, TextArea, TextField } from '../../components/ui/Field';
+import { ListingAssistant } from './ListingAssistant';
 import { Notice } from '../../components/ui/Notice';
 import { PageHeader, PageLoading } from '../../components/ui/Page';
 
@@ -65,6 +66,8 @@ export default function NewAuctionPage() {
     register,
     control,
     handleSubmit,
+    getValues,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<CreateAuctionFormValues>({
     resolver: zodResolver(createAuctionFormSchema),
@@ -155,7 +158,7 @@ export default function NewAuctionPage() {
     <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-10">
       <PageHeader
         title="Sell an item"
-        subtitle="Tell us about the item first — you'll see an AI valuation and set your price on the next step."
+        subtitle="Tell us about the item first — you'll see an AI appraisal and set your price on the next step."
       />
 
       <div className="grid items-start gap-8 lg:grid-cols-[1fr_320px]">
@@ -175,6 +178,10 @@ export default function NewAuctionPage() {
               hint="Say what it is, its history, and any flaws. Honest listings get more bids."
               error={errors.description?.message}
               {...register('description')}
+              // Bound to the form value on purpose: the textarea component
+              // keeps its own copy, which would otherwise overwrite text the
+              // assistant sets from code.
+              value={watched.description ?? ''}
             />
             <div className="grid gap-4 sm:grid-cols-2">
               <SelectField id="category" label="Category" {...register('category')}>
@@ -270,6 +277,24 @@ export default function NewAuctionPage() {
             )}
           </Section>
 
+          <ListingAssistant
+            accessToken={accessToken}
+            values={watched}
+            getDraft={() => {
+              const form = getValues();
+              return {
+                title: form.title ?? '',
+                description: form.description ?? '',
+                category: form.category,
+                condition: form.condition,
+                images: imageUrls,
+              };
+            }}
+            hasMaterial={Boolean(watched.title?.trim()) || imageUrls.length > 0}
+            uploading={uploading}
+            onApply={(field, value) => setValue(field, value, { shouldDirty: true, shouldValidate: true })}
+          />
+
           {stageError && (
             <Notice tone="error">
               <p>{stageError}</p>
@@ -317,7 +342,7 @@ export default function NewAuctionPage() {
             </div>
           </div>
           <p className="mt-3 text-sm text-muted-foreground">
-            Next, you&apos;ll see an AI valuation for this item and set your own price before publishing.
+            Next, you&apos;ll see an AI appraisal for this item and set your own price.
           </p>
         </aside>
       </div>

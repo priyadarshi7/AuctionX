@@ -4,8 +4,8 @@ import { logger } from '../../infrastructure/observability/logger';
 import { env } from '../../config/env';
 import { createConsumer, runConsumer, type MessageId } from '../../infrastructure/kafka/consumer';
 import { AI_VALUATION_EVENTS_TOPIC } from '../../infrastructure/kafka/topics';
-import { ollamaValuationProvider } from '../../infrastructure/ai/ollamaValuationProvider';
-import { markValuationComplete, markValuationFailed } from './repository';
+import { selectValuationProvider } from '../../infrastructure/ai/selectValuationProvider';
+import { findComparableSales, markValuationComplete, markValuationFailed } from './repository';
 
 // Same test-scoping reasoning as modules/search/consumer.ts's GROUP_ID.
 const GROUP_ID = env.NODE_ENV === 'test' ? 'ai-valuation-consumer-test' : 'ai-valuation-consumer';
@@ -54,12 +54,13 @@ export async function handleAiValuationEvent(
       return;
     }
 
-    const result = await ollamaValuationProvider.valuate({
+    const result = await selectValuationProvider().valuate({
       title: auction.title,
       description: auction.description,
       category: auction.category,
       condition: auction.condition,
       imageUrls: auction.images,
+      comparables: await findComparableSales(auction.category, auction.id),
     });
 
     await markValuationComplete(auctionId, result);

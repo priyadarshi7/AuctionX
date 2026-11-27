@@ -2,7 +2,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { ApiError } from '@/lib/apiClient';
 import { submitAuctionRequest, updateAuctionRequest } from '@/lib/auctions';
 import { DOCUMENT_REQUIRED_CATEGORIES } from '@/lib/documents';
@@ -13,6 +13,7 @@ import { Button } from '../../components/ui/Button';
 import { Field, SelectField, inputClass } from '../../components/ui/Field';
 import { Notice } from '../../components/ui/Notice';
 import { DocumentsPanel } from './DocumentsPanel';
+import { PriceGuide } from './PriceGuide';
 
 // Seller-only, DRAFT-only — the create form (app/auctions/new/page.tsx)
 // deliberately doesn't collect price, so this is where a real price is set
@@ -39,12 +40,19 @@ export function SetPriceAndPublishPanel({
   const needsDocuments = DOCUMENT_REQUIRED_CATEGORIES.includes(category);
   const {
     register,
+    control,
+    setValue,
     handleSubmit,
     formState: { errors },
   } = useForm<SetPriceAndPublishFormValues>({
     resolver: zodResolver(setPriceAndPublishFormSchema),
     defaultValues: { durationSeconds: '86400' },
   });
+  const [startingPrice, reservePrice] = useWatch({ control, name: ['startingPrice', 'reservePrice'] });
+  const toCents = (value: string | undefined) => {
+    const amount = Number(value);
+    return value && amount > 0 ? Math.round(amount * 100) : null;
+  };
 
   const submit = useMutation({
     mutationFn: async (values: SetPriceAndPublishFormValues) => {
@@ -69,7 +77,7 @@ export function SetPriceAndPublishPanel({
     <div className="panel p-5">
       <h2 className="text-lg font-semibold">Price, documents &amp; submit</h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        This draft is only visible to you. Use the AI valuation above as a rough guide and set your own price. When you
+        This draft is only visible to you. Use the AI appraisal as a rough guide and set your own price. When you
         submit, AuctionX may review the listing before it goes live. Your auction’s timer only starts once it is live.
       </p>
 
@@ -82,6 +90,18 @@ export function SetPriceAndPublishPanel({
           </Notice>
         </div>
       )}
+
+      <PriceGuide
+        auctionId={auctionId}
+        accessToken={accessToken}
+        startingCents={toCents(startingPrice)}
+        reserveCents={toCents(reservePrice)}
+        onPick={(strategy) => {
+          const options = { shouldDirty: true, shouldValidate: true };
+          setValue('startingPrice', (strategy.startCents / 100).toFixed(2), options);
+          setValue('reservePrice', strategy.reserveCents ? (strategy.reserveCents / 100).toFixed(2) : '', options);
+        }}
+      />
 
       <form
         onSubmit={handleSubmit((values) => submit.mutate(values))}

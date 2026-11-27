@@ -7,8 +7,7 @@ export async function getValuationHandler(req: Request, res: Response, next: Nex
     if (!req.user) {
       throw new UnauthorizedError('UNAUTHENTICATED');
     }
-    const valuation = await getValuation(req.user.id, req.params.auctionId as string);
-    res.status(200).json({ valuation });
+    res.status(200).json(await getValuation(req.user.id, req.params.auctionId as string));
   } catch (err) {
     next(err);
   }

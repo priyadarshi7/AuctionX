@@ -4,6 +4,15 @@
 
 export type ValuationStatus = 'PENDING' | 'COMPLETE' | 'FAILED';
 
+// A lot in the same category that actually sold here.
+export type Comparable = {
+  auctionId: string;
+  title: string;
+  condition: string;
+  priceCents: number;
+  endedAt: string | null;
+};
+
 export type Valuation = {
   id: string;
   auctionId: string;
