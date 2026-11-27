@@ -93,7 +93,7 @@ const envSchema = z.object({
   // server-side error at all, since the presign call itself never touches
   // the network (it's pure signing); only the browser's own upload to the
   // returned URL fails.
-  S3_ENDPOINT: z.string().url().default('http://127.0.0.1:9090'),
+  S3_ENDPOINT: z.string().url().default('http://127.0.0.1:9190'),
   // R2 has no real AWS regions — 'auto' is R2's own documented convention.
   // s3mock/AWS default to a real region name instead; this default is what
   // the local dev stack actually uses, overridden with 'auto' via a real
@@ -109,7 +109,7 @@ const envSchema = z.object({
   // Also 127.0.0.1 (ADR-0034) — this is the base of every uploaded image's
   // actual <img src>, so a stale relay here means every photo on the site
   // breaks too, not just new uploads.
-  S3_PUBLIC_URL_BASE: z.string().url().default('http://127.0.0.1:9090/auctionx-media'),
+  S3_PUBLIC_URL_BASE: z.string().url().default('http://127.0.0.1:9190/auctionx-media'),
   // Signs/verifies MockPaymentProvider's simulated webhook events (Section
   // 19/83 — no real payment provider account required for local dev). Gets
   // a default, unlike JWT_ACCESS_SECRET, because MockPaymentProvider itself
@@ -139,7 +139,7 @@ const envSchema = z.object({
   // publisher and the notification consumer are affected, both of which
   // already retry indefinitely rather than crash the process.
   // 127.0.0.1, not localhost (ADR-0034).
-  KAFKA_BROKERS: z.string().min(1).default('127.0.0.1:9092'),
+  KAFKA_BROKERS: z.string().min(1).default('127.0.0.1:9192'),
   // SASL_SSL credentials for a managed broker (Aiven — ADR-0036). All three
   // optional and unset by default: local Redpanda runs with no auth at all,
   // so the Kafka client must still boot plaintext when these are absent.

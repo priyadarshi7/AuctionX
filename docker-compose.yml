@@ -91,8 +91,10 @@ services:
     environment:
       COM_ADOBE_TESTING_S3MOCK_STORE_ROOT: /data
       COM_ADOBE_TESTING_S3MOCK_STORE_RETAINFILESONEXIT: 'true'
+    # Host port 9190, not 9090: 9090 is Prometheus's default and collides
+    # with it. The container still listens on 9090 (see the healthcheck).
     ports:
-      - '9090:9090'
+      - '9190:9090'
     volumes:
       - s3mock_data:/data
     # `curl` doesn't exist in this image (a minimal buildpacks/JVM base) —
@@ -135,10 +137,13 @@ services:
       - --overprovisioned
       - --node-id=0
       - --check=false
-      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
-      - --advertise-kafka-addr=PLAINTEXT://127.0.0.1:9092
+      # Port 9192, not Kafka's default 9092, which other local projects
+      # claim. Same number inside and outside the container, because the
+      # advertised address is what clients (including rpk) reconnect to.
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9192
+      - --advertise-kafka-addr=PLAINTEXT://127.0.0.1:9192
     ports:
-      - '9092:9092'
+      - '9192:9192'
     volumes:
       - redpanda_data:/var/lib/redpanda/data
     healthcheck:
